@@ -1,46 +1,13 @@
 /****************************************************************************************************************************
-  Async_ConfigOnDoubleReset_TZ.ino
-  For ESP8266 / ESP32 boards
+  Wifi Credentials epaper totem
+  For LilyGo T5_V2.3.1 2.13 (DEPG0213BN)
 
-  ESPAsync_WiFiManager is a library for the ESP8266/Arduino platform, using (ESP)AsyncWebServer to enable easy
-  configuration and reconfiguration of WiFi credentials using a Captive Portal.
-
-  Modified from
-  1. Tzapu               (https://github.com/tzapu/WiFiManager)
-  2. Ken Taylor          (https://github.com/kentaylor)
-  3. Alan Steremberg     (https://github.com/alanswx/ESPAsyncWiFiManager)
-  4. Khoi Hoang          (https://github.com/khoih-prog/ESP_WiFiManager)
-
-  Built by Khoi Hoang https://github.com/khoih-prog/ESPAsync_WiFiManager
-  Licensed under MIT license
+  Uses:
+  ESPAsync_WiFiManager by Khoi Hoang https://github.com/khoih-prog/ESPAsync_WiFiManager (MIT License)
+  ESP_DoubleResetDetector library from //https://github.com/khoih-prog/ESP_DoubleResetDetector (MIT?) (Open a configuration portal when the reset button is pressed twice.)
+  ArduinoJson library https://arduinojson.org/ 
+  
  *****************************************************************************************************************************/
-/****************************************************************************************************************************
-   This example will open a configuration portal when the reset button is pressed twice.
-   This method works well on Wemos boards which have a single reset button on board. It avoids using a pin for launching the configuration portal.
-
-   How It Works
-   1) ESP8266
-   Save data in RTC memory
-   2) ESP32
-   Save data in EEPROM from address 256, size 512 bytes (both configurable)
-
-   So when the device starts up it checks this region of ram for a flag to see if it has been recently reset.
-   If so it launches a configuration portal, if not it sets the reset flag. After running for a while this flag is cleared so that
-   it will only launch the configuration portal in response to closely spaced resets.
-
-   Settings
-   There are two values to be set in the sketch.
-
-   DRD_TIMEOUT - Number of seconds to wait for the second reset. Set to 10 in the example.
-   DRD_ADDRESS - The address in ESP8266 RTC RAM to store the flag. This memory must not be used for other purposes in the same sketch. Set to 0 in the example.
-
-   This example, originally relied on the Double Reset Detector library from https://github.com/datacute/DoubleResetDetector
-   To support ESP32, use ESP_DoubleResetDetector library from //https://github.com/khoih-prog/ESP_DoubleResetDetector
- *****************************************************************************************************************************/
-
-#if !( defined(ESP8266) ||  defined(ESP32) )
-  #error This code is intended to run on the ESP8266 or ESP32 platform! Please check your Tools->Board setting.
-#endif
 
 #define ESP_ASYNC_WIFIMANAGER_VERSION_MIN_TARGET     "ESPAsync_WiFiManager v1.9.1"
 
@@ -52,131 +19,30 @@
 // Now support ArduinoJson 6.0.0+ ( tested with v6.15.2 to v6.16.1 )
 #include <ArduinoJson.h>        // get it from https://arduinojson.org/ or install via Arduino library manager
 
-//Ported to ESP32
-#ifdef ESP32
-  #include <esp_wifi.h>
-  #include <WiFi.h>
-  #include <WiFiClient.h>
-  #include <HTTPClient.h>
-  // From v1.1.1
-  #include <WiFiMulti.h>
-  WiFiMulti wifiMulti;
-
-  // LittleFS has higher priority than SPIFFS
-  #if ( ARDUINO_ESP32C3_DEV )
-    // Currently, ESP32-C3 only supporting SPIFFS and EEPROM. Will fix to support LittleFS
-    #define USE_LITTLEFS          false
-    #define USE_SPIFFS            true
-  #else
-    //#define USE_LITTLEFS    true
-    //#define USE_SPIFFS      false
-    #define USE_LITTLEFS    false
-    #define USE_SPIFFS      true
-  #endif
-
-  #if USE_LITTLEFS
-    // Use LittleFS
-    #include "FS.h"
-
-    // The library has been merged into esp32 core release 1.0.6
-    #include <LITTLEFS.h>             // https://github.com/lorol/LITTLEFS
-    
-    FS* filesystem =      &LITTLEFS;
-    #define FileFS        LITTLEFS
-    #define FS_Name       "LittleFS"
-  #elif USE_SPIFFS
-    #include <SPIFFS.h>
-    FS* filesystem =      &SPIFFS;
-    #define FileFS        SPIFFS
-    #define FS_Name       "SPIFFS"
-  #else
-    // +Use FFat
-    #include <FFat.h>
-    FS* filesystem =      &FFat;
-    #define FileFS        FFat
-    #define FS_Name       "FFat"
-  #endif
-  //////
-
-  #define ESP_getChipId()   ((uint32_t)ESP.getEfuseMac())
-
-//  #define LED_BUILTIN       5
-  #define LED_ON            HIGH
-  #define LED_OFF           LOW
-
-#else
-
-  #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
-  //needed for library
-  #include <DNSServer.h>
-  #include <ESP8266HTTPClient.h>
-  // From v1.1.1
-  #include <ESP8266WiFiMulti.h>
-  ESP8266WiFiMulti wifiMulti;
-
-  #define USE_LITTLEFS      true
-  
-  #if USE_LITTLEFS
-    #include <LittleFS.h>
-    FS* filesystem =      &LittleFS;
-    #define FileFS        LittleFS
-    #define FS_Name       "LittleFS"
-  #else
-    FS* filesystem =      &SPIFFS;
-    #define FileFS        SPIFFS
-    #define FS_Name       "SPIFFS"
-  #endif
-  //////
-  
-  #define ESP_getChipId()   (ESP.getChipId())
-  
-  #define LED_ON      LOW
-  #define LED_OFF     HIGH
-#endif
+#include <esp_wifi.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <HTTPClient.h>
+#include <WiFiMulti.h>
+WiFiMulti wifiMulti;
+#define USE_LITTLEFS    false
+#define USE_SPIFFS      true
+#include <SPIFFS.h>
+FS* filesystem =      &SPIFFS;
+#define FileFS        SPIFFS
+#define FS_Name       "SPIFFS"
+#define ESP_getChipId()   ((uint32_t)ESP.getEfuseMac())
 
 // These defines must be put before #include <ESP_DoubleResetDetector.h>
 // to select where to store DoubleResetDetector's variable.
 // For ESP32, You must select one to be true (EEPROM or SPIFFS)
 // For ESP8266, You must select one to be true (RTC, EEPROM, SPIFFS or LITTLEFS)
 // Otherwise, library will use default EEPROM storage
-#ifdef ESP32
-
-  // These defines must be put before #include <ESP_DoubleResetDetector.h>
-  // to select where to store DoubleResetDetector's variable.
-  // For ESP32, You must select one to be true (EEPROM or SPIFFS)
-  // Otherwise, library will use default EEPROM storage
-  #if USE_LITTLEFS
-    #define ESP_DRD_USE_LITTLEFS    true
-    #define ESP_DRD_USE_SPIFFS      false
-    #define ESP_DRD_USE_EEPROM      false
-  #elif USE_SPIFFS
-    #define ESP_DRD_USE_LITTLEFS    false
-    #define ESP_DRD_USE_SPIFFS      true
-    #define ESP_DRD_USE_EEPROM      false
-  #else
-    #define ESP_DRD_USE_LITTLEFS    false
-    #define ESP_DRD_USE_SPIFFS      false
-    #define ESP_DRD_USE_EEPROM      true
-  #endif
-
-#else //ESP8266
-
-  // For DRD
-  // These defines must be put before #include <ESP_DoubleResetDetector.h>
-  // to select where to store DoubleResetDetector's variable.
-  // For ESP8266, You must select one to be true (RTC, EEPROM, SPIFFS or LITTLEFS)
-  // Otherwise, library will use default EEPROM storage
-  #if USE_LITTLEFS
-    #define ESP_DRD_USE_LITTLEFS    true
-    #define ESP_DRD_USE_SPIFFS      false
-  #else
-    #define ESP_DRD_USE_LITTLEFS    false
-    #define ESP_DRD_USE_SPIFFS      true
-  #endif
-  
-  #define ESP_DRD_USE_EEPROM      false
-  #define ESP8266_DRD_USE_RTC     false
-#endif
+// These defines must be put before #include <ESP_DoubleResetDetector.h>
+// to select where to store DoubleResetDetector's variable.
+// For ESP32, You must select one to be true (EEPROM or SPIFFS)
+// Otherwise, library will use default EEPROM storage
+#define ESP_DRD_USE_SPIFFS      true
 
 #define DOUBLERESETDETECTOR_DEBUG       true  //false
 
@@ -195,48 +61,29 @@ DoubleResetDetector* drd;//////
 
 const char* CONFIG_FILE = "/ConfigCREDENTIALS.json";
 
-// Default configuration values for Adafruit IO MQTT
-// This actually works
+// Default configuration values for Credentials server
+
 #define CREDENTIALS_SERVER              "192.168.1.1"
 #define CREDENTIALS_JSON         "guest_credentials.json"
-//#define AIO_SERVERPORT          "1883" //1883, or 8883 for SSL
-//#define AIO_USERNAME            "private" //Adafruit IO
-//#define AIO_KEY                 "private"
 
 // Labels for custom parameters in WiFi manager
 #define CREDENTIALS_SERVER_Label             "CREDENTIALS_SERVER_Label"
 #define CREDENTIALS_JSON_Label             "CREDENTIALS_JSON_Label"
-//#define AIO_SERVERPORT_Label         "AIO_SERVERPORT_Label"
-//#define AIO_USERNAME_Label           "AIO_USERNAME_Label"
-//#define AIO_KEY_Label                "AIO_KEY_Label"
-
 
 // Variables to save custom parameters to...
 // I would like to use these instead of #defines
 #define custom_CREDENTIALS_SERVER_LEN       20
 #define custom_CREDENTIALS_JSON_LEN       40
-//#define custom_AIO_PORT_LEN          5
-//#define custom_AIO_USERNAME_LEN     20
-//#define custom_AIO_KEY_LEN          40
 
 char custom_CREDENTIALS_SERVER[custom_CREDENTIALS_SERVER_LEN];
 char custom_CREDENTIALS_JSON[custom_CREDENTIALS_JSON_LEN];
-//char custom_AIO_SERVERPORT[custom_AIO_PORT_LEN];
-//char custom_AIO_USERNAME[custom_AIO_USERNAME_LEN];
-//char custom_AIO_KEY[custom_AIO_KEY_LEN];
 
 // Function Prototypes
 bool readConfigFile();
 bool writeConfigFile();
-
 void newConfigData();
 void readURLJason();
 
-
-// Onboard LED I/O pin on NodeMCU board
-// const int PIN_LED = 5; // D4 on NodeMCU and WeMos. GPIO2/ADC12 of ESP32. Controls the onboard LED.
-
-// SSID and PW for Config Portal
 String ssid = "ESP_" + String(ESP_getChipId(), HEX);
 String password;
 //const char* password = "your_password";
@@ -245,7 +92,6 @@ String password;
 String Router_SSID;
 String Router_Pass;
 
-// From v1.1.1
 // You only need to format the filesystem once
 //#define FORMAT_FILESYSTEM       true
 #define FORMAT_FILESYSTEM         false
@@ -253,7 +99,6 @@ String Router_Pass;
 #define MIN_AP_PASSWORD_SIZE    8
 
 #define SSID_MAX_LEN            32
-//From v1.0.10, WPA2 passwords can be up to 63 characters long.
 #define PASS_MAX_LEN            64
 
 typedef struct
@@ -293,12 +138,12 @@ bool initialConfig = false;
 // Use false if you don't like to display Available Pages in Information Page of Config Portal
 // Comment out or use true to display Available Pages in Information Page of Config Portal
 // Must be placed before #include <ESPAsync_WiFiManager.h>
-#define USE_AVAILABLE_PAGES     true  //false
+#define USE_AVAILABLE_PAGES     false
 
 // From v1.0.10 to permit disable/enable StaticIP configuration in Config Portal from sketch. Valid only if DHCP is used.
 // You'll loose the feature of dynamically changing from DHCP to static IP, or vice versa
 // You have to explicitly specify false to disable the feature.
-//#define USE_STATIC_IP_CONFIG_IN_CP          false
+#define USE_STATIC_IP_CONFIG_IN_CP          false
 
 // Use false to disable NTP config. Advisable when using Cellphone, Tablet to access Config Portal.
 // See Issue 23: On Android phone ConfigPortal is unresponsive (https://github.com/khoih-prog/ESP_WiFiManager/issues/23)
@@ -338,25 +183,9 @@ bool initialConfig = false;
 //#define USE_DHCP_IP     false
 #endif
 
-#if ( USE_DHCP_IP )
-// Use DHCP
-#warning Using DHCP IP
 IPAddress stationIP   = IPAddress(0, 0, 0, 0);
 IPAddress gatewayIP   = IPAddress(192, 168, 1, 1);
 IPAddress netMask     = IPAddress(255, 255, 255, 0);
-#else
-// Use static IP
-#warning Using static IP
-
-#ifdef ESP32
-IPAddress stationIP   = IPAddress(192, 168, 2, 232);
-#else
-IPAddress stationIP   = IPAddress(192, 168, 2, 186);
-#endif
-
-IPAddress gatewayIP   = IPAddress(192, 168, 2, 1);
-IPAddress netMask     = IPAddress(255, 255, 255, 0);
-#endif
 
 #define USE_CONFIGURABLE_DNS      true
 
@@ -370,31 +199,6 @@ IPAddress APStaticGW  = IPAddress(192, 168, 100, 1);
 IPAddress APStaticSN  = IPAddress(255, 255, 255, 0);
 
 #include <ESPAsync_WiFiManager.h>              //https://github.com/khoih-prog/ESPAsync_WiFiManager
-
-#define HTTP_PORT     80
-
-///////////////////////////////////////////
-// New in v1.4.0
-/******************************************
-   // Defined in ESPAsync_WiFiManager.h
-  typedef struct
-  {
-    IPAddress _ap_static_ip;
-    IPAddress _ap_static_gw;
-    IPAddress _ap_static_sn;
-  }  WiFi_AP_IPConfig;
-
-  typedef struct
-  {
-    IPAddress _sta_static_ip;
-    IPAddress _sta_static_gw;
-    IPAddress _sta_static_sn;
-    #if USE_CONFIGURABLE_DNS
-    IPAddress _sta_static_dns1;
-    IPAddress _sta_static_dns2;
-    #endif
-  }  WiFi_STA_IPConfig;
-******************************************/
 
 WiFi_AP_IPConfig  WM_AP_IPconfig;
 WiFi_STA_IPConfig WM_STA_IPconfig;
@@ -481,8 +285,6 @@ uint8_t connectMultiWiFi()
 
   LOGERROR(F("Connecting MultiWifi..."));
 
-  //WiFi.mode(WIFI_STA);
-
 #if !USE_DHCP_IP
   // New in v1.4.0
   configWiFi(WM_STA_IPconfig);
@@ -516,37 +318,16 @@ uint8_t connectMultiWiFi()
     // To avoid unnecessary DRD
     drd->loop();
   
-#if ESP8266      
-    ESP.reset();
-#else
     ESP.restart();
-#endif  
   }
 
   return status;
-}
-
-void toggleLED()
-{
-  //toggle state
-  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
 }
 
 #if USE_ESP_WIFIMANAGER_NTP
 
 void printLocalTime()
 {
-#if ESP8266
-  static time_t now;
-  
-  now = time(nullptr);
-  
-  if ( now > 1451602800 )
-  {
-    Serial.print("Local Date/Time: ");
-    Serial.print(ctime(&now));
-  }
-#else
   struct tm timeinfo;
 
   getLocalTime( &timeinfo );
@@ -558,7 +339,6 @@ void printLocalTime()
     Serial.print("Local Date/Time: ");
     Serial.print( asctime( &timeinfo ) );
   }
-#endif
 }
 
 #endif
@@ -600,7 +380,6 @@ void check_status()
 {
   static ulong checkstatus_timeout  = 0;
   static ulong checkwifi_timeout    = 0;
-  static ulong LEDstatus_timeout    = 0;
   static ulong current_millis = millis();
 
 #define WIFICHECK_INTERVAL    1000L
@@ -622,12 +401,6 @@ void check_status()
     checkwifi_timeout = current_millis + WIFICHECK_INTERVAL;
   }
 
-  if ((current_millis > LEDstatus_timeout) || (LEDstatus_timeout == 0))
-  {
-    // Toggle LED at LED_INTERVAL = 2s
-    toggleLED();
-    LEDstatus_timeout = current_millis + LED_INTERVAL;
-  }
   // Print hearbeat every HEARTBEAT_INTERVAL (10) seconds.
   if ((current_millis > checkstatus_timeout) || (checkstatus_timeout == 0))
   {
@@ -722,13 +495,11 @@ void saveConfigData()
 void wifi_manager() 
 {
   Serial.println(F("\nConfig Portal requested."));
-  digitalWrite(LED_BUILTIN, LED_ON); // turn the LED on by making the voltage LOW to tell us we are in configuration mode.
-
   //Local intialization. Once its business is done, there is no need to keep it around
   // Use this to default DHCP hostname to ESP8266-XXXXXX or ESP32-XXXXXX
   //ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer);
   // Use this to personalize DHCP hostname (RFC952 conformed)
-  AsyncWebServer webServer(HTTP_PORT);
+  AsyncWebServer webServer(80);
 
 #if ( USING_ESP32_S2 || USING_ESP32_C3 ) 
   ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, NULL, "QrCode DRD-FS INFO");
@@ -779,18 +550,10 @@ void wifi_manager()
   // CREDENTIALS_JSON
   ESPAsync_WMParameter CREDENTIALS_JSON_FIELD(CREDENTIALS_JSON_Label, "CREDENTIALS JSON", custom_CREDENTIALS_JSON, custom_CREDENTIALS_JSON_LEN + 1);
 
-  // AIO_USERNAME
-  //ESPAsync_WMParameter AIO_USERNAME_FIELD(AIO_USERNAME_Label, "AIO USERNAME", custom_AIO_USERNAME, custom_AIO_USERNAME_LEN + 1);
-
-  // AIO_KEY
-  //ESPAsync_WMParameter AIO_KEY_FIELD(AIO_KEY_Label, "AIO KEY", custom_AIO_KEY, custom_AIO_KEY_LEN + 1);
-
   // add all parameters here
   // order of adding is not important
   ESPAsync_wifiManager.addParameter(&CREDENTIALS_SERVER_FIELD);
   ESPAsync_wifiManager.addParameter(&CREDENTIALS_JSON_FIELD);
-  //ESPAsync_wifiManager.addParameter(&AIO_USERNAME_FIELD);
-  //ESPAsync_wifiManager.addParameter(&AIO_KEY_FIELD);
 
   // Sets timeout in seconds until configuration portal gets turned off.
   // If not specified device will remain in configuration mode until
@@ -905,12 +668,8 @@ void wifi_manager()
     {
       LOGERROR3(F("Saving current TZ_Name ="), WM_config.TZ_Name, F(", TZ = "), WM_config.TZ);
 
-#if ESP8266
-      configTime(WM_config.TZ, "pool.ntp.org"); 
-#else
       //configTzTime(WM_config.TZ, "pool.ntp.org" );
       configTzTime(WM_config.TZ, "time.nist.gov", "0.pool.ntp.org", "1.pool.ntp.org");
-#endif
     }
     else
     {
@@ -935,8 +694,6 @@ void wifi_manager()
   // Writing JSON config file to flash for next boot
   writeConfigFile();
 
-  digitalWrite(LED_BUILTIN, LED_OFF); // Turn LED off as we are not in configuration mode.
-
 }
 
 void readURLJason()
@@ -945,62 +702,35 @@ void readURLJason()
   HTTPClient http;
 
   // Send request
-  http.begin("http://192.168.1.1/guest_credentials.json");
+  char url[64];
+  strcpy(url,"http://");
+  strcat(url, custom_CREDENTIALS_SERVER);
+  strcat(url,"/");
+  strcat(url,custom_CREDENTIALS_JSON);
+  http.useHTTP10(true);
+  http.begin(url);
   http.GET();
-
-// Print the response
-  Serial.print(http.getString());
-
-// Disconnect
-  http.end();
-
-
-  // Check HTTP status
-  /*char status[32] = {0};
-  client.readBytesUntil('\r', status, sizeof(status));
-  if (strcmp(status, "HTTP/1.1 200 OK") != 0) {
-    Serial.print(F("Unexpected response: "));
-    Serial.println(status);
-    client.stop();
-    return;
-  }*/
-
-  // Skip HTTP headers
-  /*char endOfHeaders[] = "\r\n\r\n";
-  if (!client.find(endOfHeaders)) {
-    Serial.println(F("Invalid response"));
-    client.stop();
-    return;
-  }*/
 
   // Allocate the JSON document
   // Use arduinojson.org/v6/assistant to compute the capacity.
-  //const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 60;
-  /* const size_t capacity = JSON_OBJECT_SIZE(3);
-  DynamicJsonDocument doc(capacity);
+  StaticJsonDocument<192> doc;
 
   // Parse JSON object
-  DeserializationError error = deserializeJson(doc, client);
+  DeserializationError error = deserializeJson(doc, http.getString());
   if (error) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
-    client.stop();
+    http.end();
     return;
   }
 
-  // Extract values
-  Serial.println(F("Response:"));
-  Serial.println(doc["guest_SSID"].as<char*>());
-  Serial.println(doc["creation_date"].as<char*>());
+  const char* guest_ssid = doc["guest_ssid"]; 
+  const char* guest_password = doc["guest_password"];
+  const char* creation_date = doc["creation_date"]; 
   
-  /*Serial.println(doc["time"].as<long>());
-  Serial.println(doc["data"][0].as<float>(), 6);
-  Serial.println(doc["data"][1].as<float>(), 6);
-
-  // Disconnect
-  client.stop(); */
+// Disconnect
+  http.end();
 }
-
 
 bool readConfigFile() 
 {
@@ -1026,8 +756,6 @@ bool readConfigFile()
     // Using dynamic JSON buffer which is not the recommended memory model, but anyway
     // See https://github.com/bblanchon/ArduinoJson/wiki/Memory%20model
 
-#if (ARDUINOJSON_VERSION_MAJOR >= 6)
-
     DynamicJsonDocument json(1024);
     auto deserializeError = deserializeJson(json, buf.get());
     
@@ -1039,23 +767,6 @@ bool readConfigFile()
     
     serializeJson(json, Serial);
     
-#else
-
-    DynamicJsonBuffer jsonBuffer;
-    // Parse JSON string
-    JsonObject& json = jsonBuffer.parseObject(buf.get());
-    
-    // Test if parsing succeeds.
-    if (!json.success())
-    {
-      Serial.println(F("JSON parseObject() failed"));
-      return false;
-    }
-    
-    json.printTo(Serial);
-    
-#endif
-
     // Parse all config file parameters, override
     // local config variables with parsed values
     if (json.containsKey(CREDENTIALS_SERVER_Label))
@@ -1068,15 +779,6 @@ bool readConfigFile()
       strcpy(custom_CREDENTIALS_JSON, json[CREDENTIALS_JSON_Label]);
     }
 
-    /*if (json.containsKey(AIO_USERNAME_Label))
-    {
-      strcpy(custom_AIO_USERNAME, json[AIO_USERNAME_Label]);
-    }
-
-    if (json.containsKey(AIO_KEY_Label))
-    {
-      strcpy(custom_AIO_KEY, json[AIO_KEY_Label]);
-    }*/
   }
   
   Serial.println(F("\nConfig File successfully parsed"));
@@ -1088,13 +790,7 @@ bool writeConfigFile()
 {
   Serial.println(F("Saving Config File"));
 
-#if (ARDUINOJSON_VERSION_MAJOR >= 6)
   DynamicJsonDocument json(1024);
-#else
-  DynamicJsonBuffer jsonBuffer;
-  JsonObject& json = jsonBuffer.createObject();
-#endif
-
   // JSONify local configuration parameters
   json[CREDENTIALS_SERVER_Label]      = custom_CREDENTIALS_SERVER;
   json[CREDENTIALS_JSON_Label]  = custom_CREDENTIALS_JSON;
@@ -1110,15 +806,9 @@ bool writeConfigFile()
     return false;
   }
 
-#if (ARDUINOJSON_VERSION_MAJOR >= 6)
   serializeJsonPretty(json, Serial);
   // Write data to file and close it
   serializeJson(json, f);
-#else
-  json.prettyPrintTo(Serial);
-  // Write data to file and close it
-  json.printTo(f);
-#endif
 
   f.close();
 
@@ -1136,18 +826,11 @@ void newConfigData()
   Serial.println(custom_CREDENTIALS_SERVER);
   Serial.print(F("custom_CREDENTIALS_JSON: ")); 
   Serial.println(custom_CREDENTIALS_JSON);
-  /*Serial.print(F("custom_USERNAME_KEY: ")); 
-  Serial.println(custom_AIO_USERNAME);
-  Serial.print(F("custom_KEY: ")); 
-  Serial.println(custom_AIO_KEY);*/
   Serial.println();
 }
 
 void setup()
 {
-  // Initialize the LED digital pin as an output.
-  pinMode(LED_BUILTIN, OUTPUT);
-
   // Put your setup code here, to run once
   Serial.begin(115200);
   while (!Serial);
@@ -1175,16 +858,8 @@ void setup()
   }
 
   // Format FileFS if not yet
-#ifdef ESP32
   if (!FileFS.begin(true))
-#else
-  if (!FileFS.begin())
-#endif
   {
-#ifdef ESP8266
-    FileFS.format();
-#endif
-
     Serial.println(F("SPIFFS/LittleFS failed! Already tried formatting."));
   
     if (!FileFS.begin())
@@ -1192,12 +867,7 @@ void setup()
       // prevents debug info from the library to hide err message.
       delay(100);
       
-#if USE_LITTLEFS
-      Serial.println(F("LittleFS failed!. Please use SPIFFS or EEPROM. Stay forever"));
-#else
       Serial.println(F("SPIFFS failed!. Please use LittleFS or EEPROM. Stay forever"));
-#endif
-
       while (true)
       {
         delay(1);
@@ -1247,12 +917,8 @@ void setup()
     {
       LOGERROR3(F("Current TZ_Name ="), WM_config.TZ_Name, F(", TZ = "), WM_config.TZ);
 
-  #if ESP8266
-      configTime(WM_config.TZ, "pool.ntp.org"); 
-  #else
-      //configTzTime(WM_config.TZ, "pool.ntp.org" );
+  
       configTzTime(WM_config.TZ, "192.168.1.1", "0.pool.ntp.org", "1.pool.ntp.org");
-  #endif   
     }
     else
     {
@@ -1285,8 +951,7 @@ void setup()
       connectMultiWiFi();
     }
   }
-
-  digitalWrite(LED_BUILTIN, LED_OFF); // Turn led off as we are not in configuration mode.   
+  
 }
 
 
