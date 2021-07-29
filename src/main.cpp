@@ -24,14 +24,31 @@
 #include <WiFiClient.h>
 #include <HTTPClient.h>
 #include <WiFiMulti.h>
-WiFiMulti wifiMulti;
+#include <SPIFFS.h>
+
+#define LILYGO_T5_V213
+
+#include <boards.h>
+#include <GxEPD.h>
+#include <GxDEPG0213BN/GxDEPG0213BN.h> 
+#include <U8g2_for_Adafruit_GFX.h>
+#include <GxIO/GxIO_SPI/GxIO_SPI.h>
+#include <GxIO/GxIO.h>
+#include <Wire.h>
+
+#define LILYGO_T5_V213
 #define USE_LITTLEFS    false
 #define USE_SPIFFS      true
-#include <SPIFFS.h>
-FS* filesystem =      &SPIFFS;
+
 #define FileFS        SPIFFS
 #define FS_Name       "SPIFFS"
 #define ESP_getChipId()   ((uint32_t)ESP.getEfuseMac())
+
+WiFiMulti wifiMulti;
+FS* filesystem =      &SPIFFS;
+GxIO_Class io(SPI,  EPD_CS, EPD_DC,  EPD_RSET);
+GxEPD_Class display(io, EPD_RSET, EPD_BUSY);
+U8G2_FOR_ADAFRUIT_GFX u8g2Fonts;
 
 // These defines must be put before #include <ESP_DoubleResetDetector.h>
 // to select where to store DoubleResetDetector's variable.
@@ -82,7 +99,8 @@ char custom_CREDENTIALS_JSON[custom_CREDENTIALS_JSON_LEN];
 bool readConfigFile();
 bool writeConfigFile();
 void newConfigData();
-void readURLJason();
+void updateCredentials();
+void displaySetup();
 
 String ssid = "ESP_" + String(ESP_getChipId(), HEX);
 String password;
@@ -380,9 +398,11 @@ void check_status()
 {
   static ulong checkstatus_timeout  = 0;
   static ulong checkwifi_timeout    = 0;
+  static ulong credentials_timeout = 0;
   static ulong current_millis = millis();
 
 #define WIFICHECK_INTERVAL    1000L
+#define CREDENTIALS_INTERVAL  10000L
 
 #if USE_ESP_WIFIMANAGER_NTP
   #define HEARTBEAT_INTERVAL    60000L
@@ -405,9 +425,14 @@ void check_status()
   if ((current_millis > checkstatus_timeout) || (checkstatus_timeout == 0))
   {
     heartBeatPrint();
-    newConfigData();
-    readURLJason();
     checkstatus_timeout = current_millis + HEARTBEAT_INTERVAL;
+  }
+  // Check wifi credentials every CREDENTIALS_INTERNAL (10) seconds.
+  if ((current_millis > credentials_timeout) || (credentials_timeout == 0))
+  {
+   // heartBeatPrint();
+    updateCredentials();
+    credentials_timeout = current_millis + HEARTBEAT_INTERVAL;
   }
 }
 
@@ -696,7 +721,41 @@ void wifi_manager()
 
 }
 
-void readURLJason()
+void displayCredentials(const char* guest_ssid, const char* guest_password, const char* creation_date)
+{
+  
+  //u8g2Fonts.setFont(u8g2_font_helvR14_tf);            // select u8g2 font from here: https://github.com/olikraus/u8g2/wiki/fntlistall
+  u8g2Fonts.setFont(u8g2_font_profont22_tf);
+  uint16_t width = display.width();
+  uint16_t height = display.height();
+
+
+  uint16_t x = 0;
+  uint16_t y = height - 90;
+  u8g2Fonts.setCursor(x, y);                          // start writing at this position
+  u8g2Fonts.print("SSID:");
+
+  //display.fillScreen(GxEPD_WHITE);
+
+  x = width / 2 - 40 ;
+  y = height - 70;
+  u8g2Fonts.setCursor(x, y);                          // start writing at this position
+  u8g2Fonts.print(guest_ssid);
+
+  x = 0;
+  y = height - 45;
+  u8g2Fonts.setCursor(x, y);                          // start writing at this position
+  u8g2Fonts.print("Password:");
+
+  x = width / 2 - 58 ;
+  y = height - 25;
+  u8g2Fonts.setCursor(x, y);                          // start writing at this position
+  u8g2Fonts.print(guest_password);
+  display.update();
+}
+
+
+void updateCredentials()
 {
   // Connect to HTTP server
   HTTPClient http;
@@ -721,12 +780,15 @@ void readURLJason()
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
     http.end();
+    displayCredentials("N/A", "N/A", "N/A");
     return;
   }
 
   const char* guest_ssid = doc["guest_ssid"]; 
   const char* guest_password = doc["guest_password"];
   const char* creation_date = doc["creation_date"]; 
+
+  displayCredentials(guest_ssid, guest_password, creation_date);
   
 // Disconnect
   http.end();
@@ -829,6 +891,22 @@ void newConfigData()
   Serial.println();
 }
 
+void displaySetup()
+{
+    SPI.begin(EPD_SCLK, EPD_MISO, EPD_MOSI);
+    display.init(); // enable diagnostic output on Serial
+    u8g2Fonts.begin(display);
+    u8g2Fonts.setFontMode(1);                           // use u8g2 transparent mode (this is default)
+    u8g2Fonts.setFontDirection(0);                      // left to right (this is default)
+    u8g2Fonts.setForegroundColor(GxEPD_BLACK);          // apply Adafruit GFX color
+    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+    display.fillScreen(GxEPD_WHITE);
+    display.update();
+}
+
+
+
+
 void setup()
 {
   // Put your setup code here, to run once
@@ -836,6 +914,7 @@ void setup()
   while (!Serial);
 
   delay(200);
+  displaySetup();
 
   Serial.print(F("\nStarting Wifi QrCode Info using ")); Serial.print(FS_Name);
   Serial.print(F(" on ")); Serial.println(ARDUINO_BOARD);
