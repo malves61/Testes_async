@@ -35,6 +35,7 @@
 #include <GxIO/GxIO_SPI/GxIO_SPI.h>
 #include <GxIO/GxIO.h>
 #include <Wire.h>
+#include <qrcode.h>
 
 #define LILYGO_T5_V213
 #define USE_LITTLEFS    false
@@ -49,6 +50,8 @@ FS* filesystem =      &SPIFFS;
 GxIO_Class io(SPI,  EPD_CS, EPD_DC,  EPD_RSET);
 GxEPD_Class display(io, EPD_RSET, EPD_BUSY);
 U8G2_FOR_ADAFRUIT_GFX u8g2Fonts;
+
+QRcode qrcode (&display);
 
 // These defines must be put before #include <ESP_DoubleResetDetector.h>
 // to select where to store DoubleResetDetector's variable.
@@ -100,6 +103,9 @@ bool readConfigFile();
 bool writeConfigFile();
 void newConfigData();
 void updateCredentials();
+void additionalInfo();
+void additionalInfo2();
+void statusInfo();
 void displaySetup();
 
 String ssid = "ESP_" + String(ESP_getChipId(), HEX);
@@ -136,6 +142,9 @@ typedef struct
 // Assuming max 49 chars
 #define TZNAME_MAX_LEN            50
 #define TIMEZONE_MAX_LEN          50
+// Amount of time to transform wifi credentials creation date/time to expire date/time.
+// Adjust accordingly to struct tm properties. Google time.h
+#define CREATION_TO_EXPIRE        tm_mday +=1
 
 typedef struct
 {
@@ -358,7 +367,6 @@ void printLocalTime()
     Serial.print( asctime( &timeinfo ) );
   }
 }
-
 #endif
 
 void heartBeatPrint()
@@ -398,11 +406,11 @@ void check_status()
 {
   static ulong checkstatus_timeout  = 0;
   static ulong checkwifi_timeout    = 0;
-  static ulong credentials_timeout = 0;
+  static ulong display_timeout = 0;
   static ulong current_millis = millis();
 
 #define WIFICHECK_INTERVAL    1000L
-#define CREDENTIALS_INTERVAL  10000L
+#define DISPLAY_INTERVAL  30000L
 
 #if USE_ESP_WIFIMANAGER_NTP
   #define HEARTBEAT_INTERVAL    60000L
@@ -427,12 +435,14 @@ void check_status()
     heartBeatPrint();
     checkstatus_timeout = current_millis + HEARTBEAT_INTERVAL;
   }
-  // Check wifi credentials every CREDENTIALS_INTERNAL (10) seconds.
-  if ((current_millis > credentials_timeout) || (credentials_timeout == 0))
+  // Check display update every DISPLAY_INTERNAL (30) seconds.
+  if ((current_millis > display_timeout) || (display_timeout == 0))
   {
-   // heartBeatPrint();
     updateCredentials();
-    credentials_timeout = current_millis + HEARTBEAT_INTERVAL;
+    additionalInfo();
+    additionalInfo2();
+    statusInfo();
+    display_timeout = current_millis + DISPLAY_INTERVAL;
   }
 }
 
@@ -694,7 +704,7 @@ void wifi_manager()
       LOGERROR3(F("Saving current TZ_Name ="), WM_config.TZ_Name, F(", TZ = "), WM_config.TZ);
 
       //configTzTime(WM_config.TZ, "pool.ntp.org" );
-      configTzTime(WM_config.TZ, "time.nist.gov", "0.pool.ntp.org", "1.pool.ntp.org");
+      configTzTime(WM_config.TZ, "192.168.1.1", "0.pool.ntp.org", "1.pool.ntp.org");
     }
     else
     {
@@ -721,39 +731,85 @@ void wifi_manager()
 
 }
 
-void displayCredentials(const char* guest_ssid, const char* guest_password, const char* creation_date)
+void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line1, 
+                     const uint16_t line1_width, const char* line2, const uint16_t line2_width, const uint16_t y, const uint16_t height)
 {
+  uint16_t width = display.width();
   
-  //u8g2Fonts.setFont(u8g2_font_helvR14_tf);            // select u8g2 font from here: https://github.com/olikraus/u8g2/wiki/fntlistall
-  u8g2Fonts.setFont(u8g2_font_profont22_tf);
+  display.fillRect(0, y , width, height, GxEPD_BLACK);
+  display.updateWindow(0, y, width, height, false);
+  display.fillRect(0, y , width, height, GxEPD_WHITE);
+  display.updateWindow(0, y, width, height, false);
+ 
+  u8g2Fonts.setFont(icon_font);
+  u8g2Fonts.drawStr(0, y+height, icon);
+
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
+  uint16_t x = (width - line1_width - message_offset)/2 + message_offset;
+  u8g2Fonts.drawStr(x, y+height-10, line1);
+
+  x = (width - line2_width - message_offset) /2 + message_offset;
+  u8g2Fonts.drawStr(x, y+height, line2); 
+
+  display.updateWindow(0, y, width, height, false);
+}
+
+
+void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line, 
+                     const uint16_t line_width, const uint16_t y, const uint16_t height, const uint16_t offsetY_message)
+{
+  uint16_t width = display.width();
+  
+  display.fillRect(0, y , width, height, GxEPD_BLACK);
+  display.updateWindow(0, y, width, height, false);
+  display.fillRect(0, y , width, height, GxEPD_WHITE);
+  display.updateWindow(0, y, width, height, false);
+ 
+  u8g2Fonts.setFont(icon_font);
+  u8g2Fonts.drawStr(0, y+height, icon);
+
+  u8g2Fonts.setFont(u8g2_font_helvB12_tf);
+  uint16_t x = (width - line_width - message_offset)/2 + message_offset;
+  u8g2Fonts.drawStr(x, y+height-offsetY_message, line);
+
+  display.updateWindow(0, y, width, height, false);
+}
+
+void drawCredentials(const char* guest_ssid, const char* guest_password, const char* expire_tm)
+{
   uint16_t width = display.width();
   uint16_t height = display.height();
 
+  display.fillRect(0, 0 , width, height-75, GxEPD_BLACK);
+  display.updateWindow(0, 0, width, height-75, false);
+  display.fillRect(0, 0 , width, height-75, GxEPD_WHITE);
+  display.updateWindow(0, 0, width, height-75, false);
 
-  uint16_t x = 0;
-  uint16_t y = height - 90;
-  u8g2Fonts.setCursor(x, y);                          // start writing at this position
-  u8g2Fonts.print("SSID:");
+  char message [64]; 
 
-  //display.fillScreen(GxEPD_WHITE);
+  strcpy(message,"WIFI:T:WPA;S:");
+  strcat(message, guest_ssid);
+  strcat(message, ";P:");
+  strcat(message, guest_password);
+  strcat(message, ";;");
+  
+  qrcode.create(message);
 
-  x = width / 2 - 40 ;
-  y = height - 70;
-  u8g2Fonts.setCursor(x, y);                          // start writing at this position
-  u8g2Fonts.print(guest_ssid);
+  display.updateWindow(0, 0, width, height-78, false);
 
-  x = 0;
-  y = height - 45;
-  u8g2Fonts.setCursor(x, y);                          // start writing at this position
-  u8g2Fonts.print("Password:");
-
-  x = width / 2 - 58 ;
-  y = height - 25;
-  u8g2Fonts.setCursor(x, y);                          // start writing at this position
-  u8g2Fonts.print(guest_password);
-  display.update();
+  u8g2Fonts.setFont(u8g2_font_helvB12_tf);
+  
+  drawLineMessage(u8g2_font_open_iconic_www_2x_t, "\x51", 16, guest_ssid, 
+                  u8g2Fonts.getUTF8Width(guest_ssid), height - 148, 25, 3);
+   
+  drawLineMessage(u8g2_font_open_iconic_thing_2x_t, "\x4F", 16, guest_password, 
+                  u8g2Fonts.getUTF8Width(guest_password), height - 123, 25, 4);
+  
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
+ 
+  drawLineMessage(u8g2_font_open_iconic_app_2x_t, "\x42", 16, "V\xe1lido at\xe9", 
+                  u8g2Fonts.getUTF8Width("Válido até"), expire_tm, u8g2Fonts.getUTF8Width(expire_tm), height - 98, 23);
 }
-
 
 void updateCredentials()
 {
@@ -776,23 +832,91 @@ void updateCredentials()
 
   // Parse JSON object
   DeserializationError error = deserializeJson(doc, http.getString());
+  http.end(); // Disconnect
+
   if (error) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
-    http.end();
-    displayCredentials("N/A", "N/A", "N/A");
+    drawCredentials("N/A", "N/A", "N/A");
     return;
   }
+  http.end(); // Disconnect
 
   const char* guest_ssid = doc["guest_ssid"]; 
   const char* guest_password = doc["guest_password"];
   const char* creation_date = doc["creation_date"]; 
+  static char saved_date[32] = "YYYY-MM-DDT00:00:00Z";
 
-  displayCredentials(guest_ssid, guest_password, creation_date);
+ // if (strcmp(creation_date, saved_date) == 0) //////////////////////////////////////////////////////////////////////////
+ //    return;
+
+  strcpy(saved_date,creation_date); //keeping last creation date saved between function calls
+
+  struct tm valid_tm = {0};
+  time_t      stamp;
+  char buf[16];
   
-// Disconnect
-  http.end();
+  // Convert to tm struct
+  strptime(creation_date, "%Y-%m-%dT%H:%M:%SZ", &valid_tm); //get creation_date string into a tm struct for easy of parsing.
+  valid_tm.CREATION_TO_EXPIRE; //valid_tm is the time when credentials will expire. Adjust define accordingly.
+
+  stamp = mktime(&valid_tm); // obtain time stamp as epoch time.
+  strftime(buf, sizeof(buf), "%H:%M de %d/%m", gmtime(&stamp)); //    Transforms tm from UTC to Local and format tm into a time data string. Change accordingly to the info you want to display.
+  drawCredentials(guest_ssid, guest_password, buf);  
 }
+
+void additionalInfo()
+{
+  uint16_t height = display.height();
+
+  char buf[32];
+  strcpy(buf, "Piscina: ");
+  strcat(buf,"+40");
+  strcat(buf, "\xb0\x00");
+  strcat(buf, "C");
+  
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
+  drawLineMessage(u8g2_font_open_iconic_weather_2x_t, "\x45", 16, buf, 
+                  u8g2Fonts.getUTF8Width(buf), "Em 00:00 de 00/00", u8g2Fonts.getUTF8Width("Em 00:00 de 00/00"), height - 75, 25);
+}
+
+void additionalInfo2(){
+  uint16_t height = display.height();
+  
+  char buf[32];
+  struct tm timeinfo;
+
+  getLocalTime( &timeinfo );
+  strftime(buf, sizeof(buf), "Em %H:%M de %d/%m", &timeinfo);
+
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
+  drawLineMessage(u8g2_font_open_iconic_app_2x_t, "\x45", 16, "\xdaltimo update:", 
+                  u8g2Fonts.getUTF8Width("Último update:"), buf, u8g2Fonts.getUTF8Width(buf), height - 50, 25);
+}
+
+void statusInfo(){
+  uint16_t width = display.width();
+  uint16_t height = display.height();
+  
+  display.fillRect(0, height - 25 , width, 25, GxEPD_BLACK);
+  display.updateWindow(0, height-25, width, 25, false);
+  display.fillRect(0, height - 25 , width, 25, GxEPD_WHITE);
+  display.updateWindow(0, height - 25, width, 25, false);
+
+  u8g2Fonts.setFont(u8g2_font_open_iconic_embedded_2x_t);
+
+  uint16_t x = 0;
+  uint16_t y = height;
+  u8g2Fonts.drawStr(x,y, "\x49");
+
+  x = width / 2 - 32 ;
+  y = height-2;
+
+  u8g2Fonts.setFont(u8g2_font_helvB12_tf);
+  u8g2Fonts.drawStr(x,y, "100%");
+  display.updateWindow(0, height - 25, width, 25, false);
+}
+
 
 bool readConfigFile() 
 {
@@ -856,8 +980,6 @@ bool writeConfigFile()
   // JSONify local configuration parameters
   json[CREDENTIALS_SERVER_Label]      = custom_CREDENTIALS_SERVER;
   json[CREDENTIALS_JSON_Label]  = custom_CREDENTIALS_JSON;
-  //json[AIO_USERNAME_Label]    = custom_AIO_USERNAME;
-  //json[AIO_KEY_Label]         = custom_AIO_KEY;
 
   // Open file for writing
   File f = FileFS.open(CONFIG_FILE, "w");
@@ -895,16 +1017,13 @@ void displaySetup()
 {
     SPI.begin(EPD_SCLK, EPD_MISO, EPD_MOSI);
     display.init(); // enable diagnostic output on Serial
+    qrcode.init();
     u8g2Fonts.begin(display);
     u8g2Fonts.setFontMode(1);                           // use u8g2 transparent mode (this is default)
     u8g2Fonts.setFontDirection(0);                      // left to right (this is default)
     u8g2Fonts.setForegroundColor(GxEPD_BLACK);          // apply Adafruit GFX color
     u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
-    display.fillScreen(GxEPD_WHITE);
-    display.update();
 }
-
-
 
 
 void setup()
@@ -913,7 +1032,6 @@ void setup()
   Serial.begin(115200);
   while (!Serial);
 
-  delay(200);
   displaySetup();
 
   Serial.print(F("\nStarting Wifi QrCode Info using ")); Serial.print(FS_Name);
