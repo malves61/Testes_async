@@ -6,6 +6,9 @@
   ESPAsync_WiFiManager by Khoi Hoang https://github.com/khoih-prog/ESPAsync_WiFiManager (MIT License)
   ESP_DoubleResetDetector library from //https://github.com/khoih-prog/ESP_DoubleResetDetector (MIT?) (Open a configuration portal when the reset button is pressed twice.)
   ArduinoJson library https://arduinojson.org/ 
+  GxEPD library fork https://github.com/lewisxhe/GxEPD
+  u8g2 library https://github.com/olikraus/u8g2
+  QRCode library  https://github.com/yoprogramo/ESP_QRcode
   
  *****************************************************************************************************************************/
 
@@ -24,7 +27,7 @@
 #include <WiFiClient.h>
 #include <HTTPClient.h>
 #include <WiFiMulti.h>
-#include <SPIFFS.h>
+#include <SPIFFS.h>        
 
 #define LILYGO_T5_V213
 
@@ -78,39 +81,31 @@ QRcode qrcode (&display);
 //DoubleResetDetector drd(DRD_TIMEOUT, DRD_ADDRESS);
 DoubleResetDetector* drd;//////
 
-
 const char* CONFIG_FILE = "/ConfigCREDENTIALS.json";
 
 // Default configuration values for Credentials server
 
-#define CREDENTIALS_SERVER              "192.168.1.1"
-#define CREDENTIALS_JSON         "guest_credentials.json"
+#define CREDENTIALS_JSON  "http://192.168.1.1/guest_credentials.json"
+#define INFO1_REST        "http://192.168.1.100:8080/rest/items/Piscina_TemperaturaVerificada"
+#define INFO2_REST        "http://192.168.1.100:8080/rest/items/Piscina_Temperatura_Verificada_Update"               
 
 // Labels for custom parameters in WiFi manager
-#define CREDENTIALS_SERVER_Label             "CREDENTIALS_SERVER_Label"
-#define CREDENTIALS_JSON_Label             "CREDENTIALS_JSON_Label"
+#define CREDENTIALS_JSON_Label             "Credentials JSON Call URI"
+#define INFO1_REST_Label        "Info 1 Rest Call URI"
+#define INFO2_REST_Label        "Info 2 Rest Call URI"
 
 // Variables to save custom parameters to...
 // I would like to use these instead of #defines
-#define custom_CREDENTIALS_SERVER_LEN       20
-#define custom_CREDENTIALS_JSON_LEN       40
+#define custom_CREDENTIALS_JSON_LEN   64
+#define custom_INFO1_REST_LEN         96
+#define custom_INFO2_REST_LEN         96
 
-char custom_CREDENTIALS_SERVER[custom_CREDENTIALS_SERVER_LEN];
 char custom_CREDENTIALS_JSON[custom_CREDENTIALS_JSON_LEN];
-
-// Function Prototypes
-bool readConfigFile();
-bool writeConfigFile();
-void newConfigData();
-void updateCredentials();
-void additionalInfo();
-void additionalInfo2();
-void statusInfo();
-void displaySetup();
+char custom_INFO1_REST[custom_INFO1_REST_LEN];
+char custom_INFO2_REST[custom_INFO2_REST_LEN];
 
 String ssid = "ESP_" + String(ESP_getChipId(), HEX);
 String password;
-//const char* password = "your_password";
 
 // SSID and PW for your Router
 String Router_SSID;
@@ -142,6 +137,7 @@ typedef struct
 // Assuming max 49 chars
 #define TZNAME_MAX_LEN            50
 #define TIMEZONE_MAX_LEN          50
+
 // Amount of time to transform wifi credentials creation date/time to expire date/time.
 // Adjust accordingly to struct tm properties. Google time.h
 #define CREATION_TO_EXPIRE        tm_mday +=1
@@ -157,7 +153,6 @@ typedef struct
 WM_Config         WM_config;
 
 #define  CONFIG_FILENAME              F("/wifi_cred.dat")
-//////
 
 // Indicates whether ESP has WiFi credentials saved from previous session, or double reset detected
 bool initialConfig = false;
@@ -221,11 +216,11 @@ IPAddress dns1IP      = IPAddress(192, 168, 1, 100);
 
 #define USE_CUSTOM_AP_IP          false
 
+#include <ESPAsync_WiFiManager.h>    
+
 IPAddress APStaticIP  = IPAddress(192, 168, 100, 1);
 IPAddress APStaticGW  = IPAddress(192, 168, 100, 1);
 IPAddress APStaticSN  = IPAddress(255, 255, 255, 0);
-
-#include <ESPAsync_WiFiManager.h>              //https://github.com/khoih-prog/ESPAsync_WiFiManager
 
 WiFi_AP_IPConfig  WM_AP_IPconfig;
 WiFi_STA_IPConfig WM_STA_IPconfig;
@@ -402,6 +397,255 @@ void check_WiFi()
   }
 }
 
+void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line1, 
+                     const uint16_t line1_width, const char* line2, const uint16_t line2_width, const uint16_t y, const uint16_t height)
+// drawLineMessage overloaded for two lines of information in one block.
+// see overloaded funcion below
+{
+  uint16_t width = display.width();
+  
+  display.fillRect(0, y , width, height, GxEPD_BLACK);
+  display.updateWindow(0, y, width, height, false);
+  display.fillRect(0, y , width, height, GxEPD_WHITE);
+  display.updateWindow(0, y, width, height, false);
+ 
+  u8g2Fonts.setFont(icon_font);
+  u8g2Fonts.drawStr(0, y+height, icon);
+
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf); // has to be a small font. 8px for a 23~25 pix height field
+  uint16_t x = (width - line1_width - message_offset)/2 + message_offset; //line 1
+  u8g2Fonts.drawStr(x, y+height-10, line1);
+  x = (width - line2_width - message_offset) /2 + message_offset; //line 2
+  u8g2Fonts.drawStr(x, y+height, line2); 
+
+  display.updateWindow(0, y, width, height, false);
+}
+
+void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line, 
+                     const uint16_t line_width, const uint16_t y, const uint16_t height, const uint16_t offsetY_message)
+// drawLineMessage overloaded for onr line of information in one block.
+// see overloaded funcion above.
+{
+  uint16_t width = display.width();
+  
+  display.fillRect(0, y , width, height, GxEPD_BLACK);
+  display.updateWindow(0, y, width, height, false);
+  display.fillRect(0, y , width, height, GxEPD_WHITE);
+  display.updateWindow(0, y, width, height, false);
+ 
+  u8g2Fonts.setFont(icon_font);
+  u8g2Fonts.drawStr(0, y+height, icon);
+
+  u8g2Fonts.setFont(u8g2_font_helvB12_tf);  // a 12px font is good for a 25 pix height field with enought room for offsetY
+  uint16_t x = (width - line_width - message_offset)/2 + message_offset;
+  u8g2Fonts.drawStr(x, y+height-offsetY_message, line); // single line of text
+
+  display.updateWindow(0, y, width, height, false);
+}
+
+void drawCredentials(const char* guest_ssid, const char* guest_password, const char* expire_tm)
+{
+  uint16_t width = display.width();
+  uint16_t height = display.height();
+
+  display.fillRect(0, 0 , width, height-75, GxEPD_BLACK);
+  display.updateWindow(0, 0, width, height-75, false);
+  display.fillRect(0, 0 , width, height-75, GxEPD_WHITE);
+  display.updateWindow(0, 0, width, height-75, false);
+
+  char message [64]; 
+
+  strcpy(message,"WIFI:T:WPA;S:");
+  strcat(message, guest_ssid);
+  strcat(message, ";P:");
+  strcat(message, guest_password);
+  strcat(message, ";;");
+  
+  qrcode.create(message);  // draws qrcode. See https://github.com/yoprogramo/ESP_QRcode. 
+
+  display.updateWindow(0, 0, width, height-75, false);
+
+  u8g2Fonts.setFont(u8g2_font_helvB12_tf); // just to get the width with u8g2 getUTF8Width.
+  
+  drawLineMessage(u8g2_font_open_iconic_www_2x_t, "\x51", 16, guest_ssid, 
+                  u8g2Fonts.getUTF8Width(guest_ssid), height - 148, 25, 3); //single info block with SSID
+   
+  drawLineMessage(u8g2_font_open_iconic_thing_2x_t, "\x4F", 16, guest_password, 
+                  u8g2Fonts.getUTF8Width(guest_password), height - 123, 25, 4); //single info block with password
+  
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf); // just to get the width with u8g2 get UTF8Width
+ 
+  drawLineMessage(u8g2_font_open_iconic_app_2x_t, "\x42", 16, "V\xe1lido at\xe9", 
+                  u8g2Fonts.getUTF8Width("Válido até"), expire_tm, u8g2Fonts.getUTF8Width(expire_tm), height - 98, 23);
+    // two lines of text in one block.
+}
+
+void updateCredentials()
+  //obtain credentials and update information IF REQUIRED ///////////////
+{
+  // Obtains credentials from CREDENTIALS JSON FILE
+  // Not an API call, simple file download.
+  HTTPClient http; // Connect to HTTP server
+
+  // Send request
+  http.useHTTP10(true);
+  http.begin(custom_CREDENTIALS_JSON);
+  http.GET();
+
+  // Allocate the JSON document
+  // Use arduinojson.org/v6/assistant to compute the capacity.
+  StaticJsonDocument<192> doc;
+
+  // Parse JSON object
+  DeserializationError error = deserializeJson(doc, http.getString());
+  http.end(); // Disconnect
+
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    drawCredentials("N/A", "N/A", "N/A");
+    return;
+  }
+  http.end(); // Disconnect
+
+  const char* guest_ssid = doc["guest_ssid"]; 
+  const char* guest_password = doc["guest_password"];
+  const char* creation_date = doc["creation_date"]; 
+  static char saved_date[32] = "YYYY-MM-DDT00:00:00Z";
+
+ if (strcmp(creation_date, saved_date) == 0)
+     return;
+
+  strcpy(saved_date,creation_date); //keeping last creation date saved between function calls
+
+  struct tm valid_tm = {0}; 
+  time_t      stamp;
+  char buf[16];
+  
+  // Convert to tm struct
+  strptime(creation_date, "%Y-%m-%dT%H:%M:%SZ", &valid_tm); //get creation_date string into a tm struct for easy of parsing.
+  valid_tm.CREATION_TO_EXPIRE; //valid_tm is the time when credentials will expire. Adjust CREATION_TO_EXPIRE definition accordingly.
+
+  stamp = mktime(&valid_tm); // obtain time stamp as epoch time.
+  strftime(buf, sizeof(buf), "%H:%M de %d/%m", gmtime(&stamp)); //    Transforms tm from UTC to Local and format tm into a time data string. Change accordingly to the info you want to display.
+  drawCredentials(guest_ssid, guest_password, buf);  
+}
+
+void additionalInfo()
+// contents of the first information block.
+{
+  uint16_t height = display.height();
+
+  HTTPClient http; // Connect to HTTP server
+
+  // Send request
+ // http.useHTTP10(true);
+
+  http.begin(custom_INFO2_REST);
+  http.addHeader("Accept", "application/json");
+  http.GET();
+  // Allocate the JSON document
+  // Use arduinojson.org/v6/assistant to compute the capacity.
+  StaticJsonDocument<768> doc;
+  DeserializationError error = deserializeJson(doc, http.getString());
+  http.end();
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+  const char* state2 = doc["state"]; 
+  static char saved_date[32] = "YYYY-MM-DDT00:00:00Z";
+
+  if (strcmp(state2, saved_date) == 0)
+     return;
+  
+  strcpy(saved_date,state2); //keeping last creation date saved between function calls
+
+  struct tm valid_tm = {0}; 
+  char buf2[32];
+ 
+  // Convert to tm struct
+  strptime(state2, "%Y-%m-%dT%H:%M:%SZ", &valid_tm); //get creation_date string into a tm struct for easy of parsing.
+  strftime(buf2, sizeof(buf2), "Em %H:%M de %d/%m", &valid_tm); //    Transforms tm from UTC to Local and format tm into a time data string. Change accordingly to the info you want to display.
+
+  http.begin(custom_INFO1_REST);
+  http.addHeader("Accept", "application/json");
+  http.GET();
+
+  //StaticJsonDocument<768> doc;
+  error = deserializeJson(doc, http.getString());
+  http.end();
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+
+  const char* state1 = doc["state"]; // "25.125 °C"
+  char vstate[16];
+  strcpy(vstate, state1);
+
+  char buf[32];
+  strcpy(buf, "Piscina: ");
+
+  char* token;
+  const char* delim = "\xc2";
+  token = strtok(vstate, delim);
+  while (token != NULL){
+    strcat(buf, token);
+    token = strtok(NULL, delim);
+  }
+
+
+  
+
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf);  // just to get correct message width
+  drawLineMessage(u8g2_font_open_iconic_weather_2x_t, "\x45", 16, buf, 
+                  u8g2Fonts.getUTF8Width(buf), buf2, u8g2Fonts.getUTF8Width(buf2), height - 75, 25);
+}
+
+void additionalInfo2()
+// contents of the second information block.
+{
+  uint16_t height = display.height();
+  
+  char buf[32];
+  struct tm timeinfo;
+
+  getLocalTime( &timeinfo );
+  strftime(buf, sizeof(buf), "Em %H:%M de %d/%m", &timeinfo);
+
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
+  drawLineMessage(u8g2_font_open_iconic_app_2x_t, "\x45", 16, "\xdaltimo update:", 
+                  u8g2Fonts.getUTF8Width("Último update:"), buf, u8g2Fonts.getUTF8Width(buf), height - 50, 25);
+}
+
+void statusInfo()
+// contents of the status bar.
+{
+  uint16_t width = display.width();
+  uint16_t height = display.height();
+  
+  display.fillRect(0, height - 25 , width, 25, GxEPD_BLACK);
+  display.updateWindow(0, height-25, width, 25, false);
+  display.fillRect(0, height - 25 , width, 25, GxEPD_WHITE);
+  display.updateWindow(0, height - 25, width, 25, false);
+
+  u8g2Fonts.setFont(u8g2_font_open_iconic_embedded_2x_t);
+
+  uint16_t x = 0;
+  uint16_t y = height;
+  u8g2Fonts.drawStr(x,y, "\x49");
+
+  x = width / 2 - 32 ;
+  y = height-2;
+
+  u8g2Fonts.setFont(u8g2_font_helvB12_tf);
+  u8g2Fonts.drawStr(x,y, "100%");
+  display.updateWindow(0, height - 25, width, 25, false);
+}
+
 void check_status()
 {
   static ulong checkstatus_timeout  = 0;
@@ -527,6 +771,105 @@ void saveConfigData()
   }
 }
 
+bool readConfigFile() 
+{
+  // this opens the config file in read-mode
+  File f = FileFS.open(CONFIG_FILE, "r");
+
+  if (!f)
+  {
+    Serial.println(F("Config File not found"));
+    return false;
+  }
+  else
+  {
+    // we could open the file
+    size_t size = f.size();
+    // Allocate a buffer to store contents of the file.
+    std::unique_ptr<char[]> buf(new char[size + 1]);
+
+    // Read and store file contents in buf
+    f.readBytes(buf.get(), size);
+    // Closing file
+    f.close();
+    // Using dynamic JSON buffer which is not the recommended memory model, but anyway
+    // See https://github.com/bblanchon/ArduinoJson/wiki/Memory%20model
+
+    DynamicJsonDocument json(1024);
+    auto deserializeError = deserializeJson(json, buf.get());
+    
+    if ( deserializeError )
+    {
+      Serial.println(F("JSON parseObject() failed"));
+      return false;
+    }
+    
+    serializeJson(json, Serial);
+    
+    // Parse all config file parameters, override
+    // local config variables with parsed values
+    if (json.containsKey(CREDENTIALS_JSON_Label))
+    {
+      strcpy(custom_CREDENTIALS_JSON, json[CREDENTIALS_JSON_Label]);
+    }
+
+    if (json.containsKey(INFO1_REST_Label))
+    {
+      strcpy(custom_INFO1_REST, json[INFO1_REST_Label]);
+    }
+
+    if (json.containsKey(INFO2_REST_Label))
+    {
+      strcpy(custom_INFO2_REST, json[INFO2_REST_Label]);
+    }
+
+  }
+  
+  Serial.println(F("\nConfig File successfully parsed"));
+  
+  return true;
+}
+
+bool writeConfigFile() 
+{
+  Serial.println(F("Saving Config File"));
+
+  DynamicJsonDocument json(1024);
+  // JSONify local configuration parameters
+  json[CREDENTIALS_JSON_Label]  = custom_CREDENTIALS_JSON;
+  json[INFO1_REST_Label]  = custom_INFO1_REST;
+  json[INFO2_REST_Label]  = custom_INFO2_REST;
+  // Open file for writing
+  File f = FileFS.open(CONFIG_FILE, "w");
+
+  if (!f)
+  {
+    Serial.println(F("Failed to open Config File for writing"));
+    return false;
+  }
+
+  serializeJsonPretty(json, Serial);
+  // Write data to file and close it
+  serializeJson(json, f);
+
+  f.close();
+
+  Serial.println(F("\nConfig File successfully saved"));
+  return true;
+}
+
+// this function is just to display newly saved data,
+// it is not necessary though, because data is displayed
+// after WiFi manager resets ESP32
+void newConfigData() 
+{
+  Serial.println();
+  Serial.print(F("custom_CREDENTIALS_JSON: ")); 
+  Serial.println(custom_CREDENTIALS_JSON);
+  Serial.println();
+}
+
+
 void wifi_manager() 
 {
   Serial.println(F("\nConfig Portal requested."));
@@ -579,16 +922,16 @@ void wifi_manager()
   // Format: <ID> <Placeholder text> <default value> <length> <custom HTML> <label placement>
   // (*** we are not using <custom HTML> and <label placement> ***)
 
-  // CREDENTIALS_SERVER
-  ESPAsync_WMParameter CREDENTIALS_SERVER_FIELD(CREDENTIALS_SERVER_Label, "CREDENTIALS SERVER", custom_CREDENTIALS_SERVER, custom_CREDENTIALS_SERVER_LEN + 1);
 
-  // CREDENTIALS_JSON
   ESPAsync_WMParameter CREDENTIALS_JSON_FIELD(CREDENTIALS_JSON_Label, "CREDENTIALS JSON", custom_CREDENTIALS_JSON, custom_CREDENTIALS_JSON_LEN + 1);
+  ESPAsync_WMParameter INFO1_REST_FIELD(INFO1_REST_Label, "INFO1_REST", custom_INFO1_REST, custom_INFO1_REST_LEN + 1);
+  ESPAsync_WMParameter INFO2_REST_FIELD(INFO2_REST_Label, "INFO2_REST", custom_INFO2_REST, custom_INFO2_REST_LEN + 1);
 
   // add all parameters here
   // order of adding is not important
-  ESPAsync_wifiManager.addParameter(&CREDENTIALS_SERVER_FIELD);
   ESPAsync_wifiManager.addParameter(&CREDENTIALS_JSON_FIELD);
+  ESPAsync_wifiManager.addParameter(&INFO1_REST_FIELD);
+  ESPAsync_wifiManager.addParameter(&INFO2_REST_FIELD);
 
   // Sets timeout in seconds until configuration portal gets turned off.
   // If not specified device will remain in configuration mode until
@@ -702,8 +1045,6 @@ void wifi_manager()
     if ( strlen(WM_config.TZ_Name) > 0 )
     {
       LOGERROR3(F("Saving current TZ_Name ="), WM_config.TZ_Name, F(", TZ = "), WM_config.TZ);
-
-      //configTzTime(WM_config.TZ, "pool.ntp.org" );
       configTzTime(WM_config.TZ, "192.168.1.1", "0.pool.ntp.org", "1.pool.ntp.org");
     }
     else
@@ -721,296 +1062,13 @@ void wifi_manager()
 
   // Getting posted form values and overriding local variables parameters
   // Config file is written regardless the connection state
-  strcpy(custom_CREDENTIALS_SERVER, CREDENTIALS_SERVER_FIELD.getValue());
   strcpy(custom_CREDENTIALS_JSON, CREDENTIALS_JSON_FIELD.getValue());
-  //strcpy(custom_AIO_USERNAME, AIO_USERNAME_FIELD.getValue());
-  //strcpy(custom_AIO_KEY, AIO_KEY_FIELD.getValue());
- 
+  strcpy(custom_INFO1_REST, INFO1_REST_FIELD.getValue());
+  strcpy(custom_INFO2_REST, INFO2_REST_FIELD.getValue());
+   
   // Writing JSON config file to flash for next boot
   writeConfigFile();
 
-}
-
-void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line1, 
-                     const uint16_t line1_width, const char* line2, const uint16_t line2_width, const uint16_t y, const uint16_t height)
-{
-  uint16_t width = display.width();
-  
-  display.fillRect(0, y , width, height, GxEPD_BLACK);
-  display.updateWindow(0, y, width, height, false);
-  display.fillRect(0, y , width, height, GxEPD_WHITE);
-  display.updateWindow(0, y, width, height, false);
- 
-  u8g2Fonts.setFont(icon_font);
-  u8g2Fonts.drawStr(0, y+height, icon);
-
-  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
-  uint16_t x = (width - line1_width - message_offset)/2 + message_offset;
-  u8g2Fonts.drawStr(x, y+height-10, line1);
-
-  x = (width - line2_width - message_offset) /2 + message_offset;
-  u8g2Fonts.drawStr(x, y+height, line2); 
-
-  display.updateWindow(0, y, width, height, false);
-}
-
-
-void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line, 
-                     const uint16_t line_width, const uint16_t y, const uint16_t height, const uint16_t offsetY_message)
-{
-  uint16_t width = display.width();
-  
-  display.fillRect(0, y , width, height, GxEPD_BLACK);
-  display.updateWindow(0, y, width, height, false);
-  display.fillRect(0, y , width, height, GxEPD_WHITE);
-  display.updateWindow(0, y, width, height, false);
- 
-  u8g2Fonts.setFont(icon_font);
-  u8g2Fonts.drawStr(0, y+height, icon);
-
-  u8g2Fonts.setFont(u8g2_font_helvB12_tf);
-  uint16_t x = (width - line_width - message_offset)/2 + message_offset;
-  u8g2Fonts.drawStr(x, y+height-offsetY_message, line);
-
-  display.updateWindow(0, y, width, height, false);
-}
-
-void drawCredentials(const char* guest_ssid, const char* guest_password, const char* expire_tm)
-{
-  uint16_t width = display.width();
-  uint16_t height = display.height();
-
-  display.fillRect(0, 0 , width, height-75, GxEPD_BLACK);
-  display.updateWindow(0, 0, width, height-75, false);
-  display.fillRect(0, 0 , width, height-75, GxEPD_WHITE);
-  display.updateWindow(0, 0, width, height-75, false);
-
-  char message [64]; 
-
-  strcpy(message,"WIFI:T:WPA;S:");
-  strcat(message, guest_ssid);
-  strcat(message, ";P:");
-  strcat(message, guest_password);
-  strcat(message, ";;");
-  
-  qrcode.create(message);
-
-  display.updateWindow(0, 0, width, height-78, false);
-
-  u8g2Fonts.setFont(u8g2_font_helvB12_tf);
-  
-  drawLineMessage(u8g2_font_open_iconic_www_2x_t, "\x51", 16, guest_ssid, 
-                  u8g2Fonts.getUTF8Width(guest_ssid), height - 148, 25, 3);
-   
-  drawLineMessage(u8g2_font_open_iconic_thing_2x_t, "\x4F", 16, guest_password, 
-                  u8g2Fonts.getUTF8Width(guest_password), height - 123, 25, 4);
-  
-  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
- 
-  drawLineMessage(u8g2_font_open_iconic_app_2x_t, "\x42", 16, "V\xe1lido at\xe9", 
-                  u8g2Fonts.getUTF8Width("Válido até"), expire_tm, u8g2Fonts.getUTF8Width(expire_tm), height - 98, 23);
-}
-
-void updateCredentials()
-{
-  // Connect to HTTP server
-  HTTPClient http;
-
-  // Send request
-  char url[64];
-  strcpy(url,"http://");
-  strcat(url, custom_CREDENTIALS_SERVER);
-  strcat(url,"/");
-  strcat(url,custom_CREDENTIALS_JSON);
-  http.useHTTP10(true);
-  http.begin(url);
-  http.GET();
-
-  // Allocate the JSON document
-  // Use arduinojson.org/v6/assistant to compute the capacity.
-  StaticJsonDocument<192> doc;
-
-  // Parse JSON object
-  DeserializationError error = deserializeJson(doc, http.getString());
-  http.end(); // Disconnect
-
-  if (error) {
-    Serial.print(F("deserializeJson() failed: "));
-    Serial.println(error.f_str());
-    drawCredentials("N/A", "N/A", "N/A");
-    return;
-  }
-  http.end(); // Disconnect
-
-  const char* guest_ssid = doc["guest_ssid"]; 
-  const char* guest_password = doc["guest_password"];
-  const char* creation_date = doc["creation_date"]; 
-  static char saved_date[32] = "YYYY-MM-DDT00:00:00Z";
-
- // if (strcmp(creation_date, saved_date) == 0) //////////////////////////////////////////////////////////////////////////
- //    return;
-
-  strcpy(saved_date,creation_date); //keeping last creation date saved between function calls
-
-  struct tm valid_tm = {0};
-  time_t      stamp;
-  char buf[16];
-  
-  // Convert to tm struct
-  strptime(creation_date, "%Y-%m-%dT%H:%M:%SZ", &valid_tm); //get creation_date string into a tm struct for easy of parsing.
-  valid_tm.CREATION_TO_EXPIRE; //valid_tm is the time when credentials will expire. Adjust define accordingly.
-
-  stamp = mktime(&valid_tm); // obtain time stamp as epoch time.
-  strftime(buf, sizeof(buf), "%H:%M de %d/%m", gmtime(&stamp)); //    Transforms tm from UTC to Local and format tm into a time data string. Change accordingly to the info you want to display.
-  drawCredentials(guest_ssid, guest_password, buf);  
-}
-
-void additionalInfo()
-{
-  uint16_t height = display.height();
-
-  char buf[32];
-  strcpy(buf, "Piscina: ");
-  strcat(buf,"+40");
-  strcat(buf, "\xb0\x00");
-  strcat(buf, "C");
-  
-  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
-  drawLineMessage(u8g2_font_open_iconic_weather_2x_t, "\x45", 16, buf, 
-                  u8g2Fonts.getUTF8Width(buf), "Em 00:00 de 00/00", u8g2Fonts.getUTF8Width("Em 00:00 de 00/00"), height - 75, 25);
-}
-
-void additionalInfo2(){
-  uint16_t height = display.height();
-  
-  char buf[32];
-  struct tm timeinfo;
-
-  getLocalTime( &timeinfo );
-  strftime(buf, sizeof(buf), "Em %H:%M de %d/%m", &timeinfo);
-
-  u8g2Fonts.setFont(u8g2_font_helvB08_tf);
-  drawLineMessage(u8g2_font_open_iconic_app_2x_t, "\x45", 16, "\xdaltimo update:", 
-                  u8g2Fonts.getUTF8Width("Último update:"), buf, u8g2Fonts.getUTF8Width(buf), height - 50, 25);
-}
-
-void statusInfo(){
-  uint16_t width = display.width();
-  uint16_t height = display.height();
-  
-  display.fillRect(0, height - 25 , width, 25, GxEPD_BLACK);
-  display.updateWindow(0, height-25, width, 25, false);
-  display.fillRect(0, height - 25 , width, 25, GxEPD_WHITE);
-  display.updateWindow(0, height - 25, width, 25, false);
-
-  u8g2Fonts.setFont(u8g2_font_open_iconic_embedded_2x_t);
-
-  uint16_t x = 0;
-  uint16_t y = height;
-  u8g2Fonts.drawStr(x,y, "\x49");
-
-  x = width / 2 - 32 ;
-  y = height-2;
-
-  u8g2Fonts.setFont(u8g2_font_helvB12_tf);
-  u8g2Fonts.drawStr(x,y, "100%");
-  display.updateWindow(0, height - 25, width, 25, false);
-}
-
-
-bool readConfigFile() 
-{
-  // this opens the config file in read-mode
-  File f = FileFS.open(CONFIG_FILE, "r");
-
-  if (!f)
-  {
-    Serial.println(F("Config File not found"));
-    return false;
-  }
-  else
-  {
-    // we could open the file
-    size_t size = f.size();
-    // Allocate a buffer to store contents of the file.
-    std::unique_ptr<char[]> buf(new char[size + 1]);
-
-    // Read and store file contents in buf
-    f.readBytes(buf.get(), size);
-    // Closing file
-    f.close();
-    // Using dynamic JSON buffer which is not the recommended memory model, but anyway
-    // See https://github.com/bblanchon/ArduinoJson/wiki/Memory%20model
-
-    DynamicJsonDocument json(1024);
-    auto deserializeError = deserializeJson(json, buf.get());
-    
-    if ( deserializeError )
-    {
-      Serial.println(F("JSON parseObject() failed"));
-      return false;
-    }
-    
-    serializeJson(json, Serial);
-    
-    // Parse all config file parameters, override
-    // local config variables with parsed values
-    if (json.containsKey(CREDENTIALS_SERVER_Label))
-    {
-      strcpy(custom_CREDENTIALS_SERVER, json[CREDENTIALS_SERVER_Label]);
-    }
-
-    if (json.containsKey(CREDENTIALS_JSON_Label))
-    {
-      strcpy(custom_CREDENTIALS_JSON, json[CREDENTIALS_JSON_Label]);
-    }
-
-  }
-  
-  Serial.println(F("\nConfig File successfully parsed"));
-  
-  return true;
-}
-
-bool writeConfigFile() 
-{
-  Serial.println(F("Saving Config File"));
-
-  DynamicJsonDocument json(1024);
-  // JSONify local configuration parameters
-  json[CREDENTIALS_SERVER_Label]      = custom_CREDENTIALS_SERVER;
-  json[CREDENTIALS_JSON_Label]  = custom_CREDENTIALS_JSON;
-
-  // Open file for writing
-  File f = FileFS.open(CONFIG_FILE, "w");
-
-  if (!f)
-  {
-    Serial.println(F("Failed to open Config File for writing"));
-    return false;
-  }
-
-  serializeJsonPretty(json, Serial);
-  // Write data to file and close it
-  serializeJson(json, f);
-
-  f.close();
-
-  Serial.println(F("\nConfig File successfully saved"));
-  return true;
-}
-
-// this function is just to display newly saved data,
-// it is not necessary though, because data is displayed
-// after WiFi manager resets ESP32
-void newConfigData() 
-{
-  Serial.println();
-  Serial.print(F("custom_CREDENTIALS_SERVER: ")); 
-  Serial.println(custom_CREDENTIALS_SERVER);
-  Serial.print(F("custom_CREDENTIALS_JSON: ")); 
-  Serial.println(custom_CREDENTIALS_JSON);
-  Serial.println();
 }
 
 void displaySetup()
