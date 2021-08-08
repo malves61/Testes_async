@@ -397,18 +397,25 @@ void check_WiFi()
   }
 }
 
+void prepDisplayMono (const uint16_t x, const uint16_t y, const uint16_t w, const uint16_t h, const uint16_t finalcolor)
+{
+  uint16_t contrastcolor = (finalcolor == GxEPD_WHITE) ? GxEPD_BLACK : GxEPD_WHITE;
+
+  display.fillRect(x, y , w, h, contrastcolor);
+  display.updateWindow(x, y, w, h, false);
+  display.fillRect(x, y , w, h, finalcolor);
+  display.updateWindow(x, y, w, h, false);
+}
+
 void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line1, 
                      const uint16_t line1_width, const char* line2, const uint16_t line2_width, const uint16_t y, const uint16_t height)
 // drawLineMessage overloaded for two lines of information in one block.
 // see overloaded funcion below
 {
   uint16_t width = display.width();
+
+  prepDisplayMono(0, y, width, height, GxEPD_WHITE);
   
-  display.fillRect(0, y , width, height, GxEPD_BLACK);
-  display.updateWindow(0, y, width, height, false);
-  display.fillRect(0, y , width, height, GxEPD_WHITE);
-  display.updateWindow(0, y, width, height, false);
- 
   u8g2Fonts.setFont(icon_font);
   u8g2Fonts.drawStr(0, y+height, icon);
 
@@ -428,10 +435,7 @@ void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t 
 {
   uint16_t width = display.width();
   
-  display.fillRect(0, y , width, height, GxEPD_BLACK);
-  display.updateWindow(0, y, width, height, false);
-  display.fillRect(0, y , width, height, GxEPD_WHITE);
-  display.updateWindow(0, y, width, height, false);
+  prepDisplayMono(0, y, width, height, GxEPD_WHITE);
  
   u8g2Fonts.setFont(icon_font);
   u8g2Fonts.drawStr(0, y+height, icon);
@@ -448,10 +452,7 @@ void drawCredentials(const char* guest_ssid, const char* guest_password, const c
   uint16_t width = display.width();
   uint16_t height = display.height();
 
-  display.fillRect(0, 0 , width, height-75, GxEPD_BLACK);
-  display.updateWindow(0, 0, width, height-75, false);
-  display.fillRect(0, 0 , width, height-75, GxEPD_WHITE);
-  display.updateWindow(0, 0, width, height-75, false);
+  prepDisplayMono(0, 0, width, height-75, GxEPD_WHITE);
 
   char message [64]; 
 
@@ -596,10 +597,7 @@ void additionalInfo()
     strcat(buf, token);
     token = strtok(NULL, delim);
   }
-
-
   
-
   u8g2Fonts.setFont(u8g2_font_helvB08_tf);  // just to get correct message width
   drawLineMessage(u8g2_font_open_iconic_weather_2x_t, "\x45", 16, buf, 
                   u8g2Fonts.getUTF8Width(buf), buf2, u8g2Fonts.getUTF8Width(buf2), height - 75, 25);
@@ -632,6 +630,18 @@ void statusInfo()
   display.fillRect(0, height - 25 , width, 25, GxEPD_WHITE);
   display.updateWindow(0, height - 25, width, 25, false);
 
+  uint16_t batADC;
+  uint16_t acumulador = 0;
+  char batADCc [10];
+  for (int8_t i =0; i<20;i++){
+    batADC = analogRead(35);
+    acumulador += batADC;
+  delay(70);
+  }
+
+  batADC=acumulador/20;
+  itoa(batADC,batADCc,10);
+
   u8g2Fonts.setFont(u8g2_font_open_iconic_embedded_2x_t);
 
   uint16_t x = 0;
@@ -642,7 +652,7 @@ void statusInfo()
   y = height-2;
 
   u8g2Fonts.setFont(u8g2_font_helvB12_tf);
-  u8g2Fonts.drawStr(x,y, "100%");
+  u8g2Fonts.drawStr(x,y, batADCc);
   display.updateWindow(0, height - 25, width, 25, false);
 }
 
@@ -654,7 +664,7 @@ void check_status()
   static ulong current_millis = millis();
 
 #define WIFICHECK_INTERVAL    1000L
-#define DISPLAY_INTERVAL  30000L
+#define DISPLAY_INTERVAL  10000L
 
 #if USE_ESP_WIFIMANAGER_NTP
   #define HEARTBEAT_INTERVAL    60000L
@@ -666,7 +676,7 @@ void check_status()
 
   current_millis = millis();
 
-  // Check WiFi every WIFICHECK_INTERVAL (1) seconds.
+  /*// Check WiFi every WIFICHECK_INTERVAL (1) seconds.
   if ((current_millis > checkwifi_timeout) || (checkwifi_timeout == 0))
   {
     check_WiFi();
@@ -678,17 +688,17 @@ void check_status()
   {
     heartBeatPrint();
     checkstatus_timeout = current_millis + HEARTBEAT_INTERVAL;
-  }
+  } */
   // Check display update every DISPLAY_INTERNAL (30) seconds.
   if ((current_millis > display_timeout) || (display_timeout == 0))
   {
-    updateCredentials();
+   /* updateCredentials();
     additionalInfo();
-    additionalInfo2();
+    additionalInfo2();*/
     statusInfo();
     display_timeout = current_millis + DISPLAY_INTERVAL;
   }
-}
+} 
 
 int calcChecksum(uint8_t* address, uint16_t sizeToCalc)
 {
@@ -1206,7 +1216,14 @@ void setup()
       connectMultiWiFi();
     }
   }
-  
+
+    updateCredentials();
+    additionalInfo();
+    additionalInfo2();
+    /*statusInfo();*/
+
+
+
 }
 
 
