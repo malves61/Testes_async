@@ -15,14 +15,13 @@
 #define ESP_ASYNC_WIFIMANAGER_VERSION_MIN_TARGET     "ESPAsync_WiFiManager v1.9.1"
 
 // Use from 0 to 4. Higher number, more debugging messages and memory usage.
-#define _ESPASYNC_WIFIMGR_LOGLEVEL_    1
+#define _ESPASYNC_WIFIMGR_LOGLEVEL_    0
 
 #include <FS.h>
 
 // Now support ArduinoJson 6.0.0+ ( tested with v6.15.2 to v6.16.1 )
 #include <ArduinoJson.h>        // get it from https://arduinojson.org/ or install via Arduino library manager
 
-#include <esp_wifi.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
@@ -119,6 +118,11 @@ String Router_Pass;
 
 #define SSID_MAX_LEN            32
 #define PASS_MAX_LEN            64
+
+#define BATMINADC 1831
+#define BATMAXADC 2268
+#define BATMULTIPLIER 0.227011
+#define BATINTERCEPT -414.9198
 
 typedef struct
 {
@@ -336,13 +340,11 @@ uint8_t connectMultiWiFi()
   else
   {
     LOGERROR(F("WiFi not connected"));
-
     // To avoid unnecessary DRD
     drd->loop();
   
     ESP.restart();
   }
-
   return status;
 }
 
@@ -364,30 +366,6 @@ void printLocalTime()
 }
 #endif
 
-void heartBeatPrint()
-{
-#if USE_ESP_WIFIMANAGER_NTP
-  printLocalTime();
-#else
-  static int num = 1;
-
-  if (WiFi.status() == WL_CONNECTED)
-    Serial.print(F("H"));        // H means connected to WiFi
-  else
-    Serial.print(F("F"));        // F means not connected to WiFi
-
-  if (num == 80)
-  {
-    Serial.println();
-    num = 1;
-  }
-  else if (num++ % 10 == 0)
-  {
-    Serial.print(F(" "));
-  }
-#endif  
-}
-
 void check_WiFi()
 {
   if ( (WiFi.status() != WL_CONNECTED) )
@@ -397,24 +375,62 @@ void check_WiFi()
   }
 }
 
-void prepDisplayMono (const uint16_t x, const uint16_t y, const uint16_t w, const uint16_t h, const uint16_t finalcolor)
-{
-  uint16_t contrastcolor = (finalcolor == GxEPD_WHITE) ? GxEPD_BLACK : GxEPD_WHITE;
+float batteryLevel(char* batADCc){
+  float batADC = 0;
+  float batADCpc = 0;
+  uint16_t acumulador = 0;
+    
+  for (int8_t i = 0; i<20;i++){
+    batADC = analogRead(35);
+    acumulador += batADC;
+  delay(70);
+  }
 
-  display.fillRect(x, y , w, h, contrastcolor);
-  display.updateWindow(x, y, w, h, false);
-  display.fillRect(x, y , w, h, finalcolor);
-  display.updateWindow(x, y, w, h, false);
+  batADC=acumulador/20;
+  if (batADC <= BATMINADC){
+    strcpy(batADCc, "0");
+  } else 
+    if (batADC >= BATMAXADC){
+      strcpy(batADCc, "100");
+    } else {
+      batADCpc= BATMULTIPLIER * batADC + BATINTERCEPT;
+      itoa(round(batADCpc), batADCc, 10);
+    }
+  strcat(batADCc,"%");
+  return batADC;
 }
 
-void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line1, 
-                     const uint16_t line1_width, const char* line2, const uint16_t line2_width, const uint16_t y, const uint16_t height)
+float batteryLevel(void){
+  float batADC;
+  uint16_t acumulador = 0;
+    
+  for (int8_t i = 0; i<20;i++){
+    batADC = analogRead(35);
+    acumulador += batADC;
+  delay(70);
+  }
+  batADC=acumulador/20;
+  return batADC;
+}
+
+void rssiLevel(char* rssic){
+  if (WiFi.status() == WL_CONNECTED) {
+    int8_t RssI = WiFi.RSSI();
+    RssI = isnan(RssI) ? -100 : RssI;
+    RssI = min(max(2 * (RssI + 100), 0), 100);
+    itoa (RssI,rssic,10);
+    strcat(rssic,"%");
+  } else{
+    strcpy(rssic,"N/A");
+  }
+}
+
+void drawLineMessage(const uint8_t* icon_font, const char* icon, uint16_t message_offset, const char* line1, 
+                     uint16_t line1_width, const char* line2, uint16_t line2_width, uint16_t y, uint16_t height)
 // drawLineMessage overloaded for two lines of information in one block.
 // see overloaded funcion below
 {
   uint16_t width = display.width();
-
-  prepDisplayMono(0, y, width, height, GxEPD_WHITE);
   
   u8g2Fonts.setFont(icon_font);
   u8g2Fonts.drawStr(0, y+height, icon);
@@ -424,35 +440,37 @@ void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t 
   u8g2Fonts.drawStr(x, y+height-10, line1);
   x = (width - line2_width - message_offset) /2 + message_offset; //line 2
   u8g2Fonts.drawStr(x, y+height, line2); 
-
-  display.updateWindow(0, y, width, height, false);
 }
 
-void drawLineMessage(const uint8_t* icon_font, const char* icon, const uint16_t message_offset, const char* line, 
-                     const uint16_t line_width, const uint16_t y, const uint16_t height, const uint16_t offsetY_message)
-// drawLineMessage overloaded for onr line of information in one block.
+void drawLineMessage(const uint8_t* icon_font, const char* icon, uint16_t message_offset, const char* line, 
+                     uint16_t line_width, uint16_t y, uint16_t height, uint16_t offsetY_message)
+// drawLineMessage overloaded for one line of information in one block.
 // see overloaded funcion above.
 {
   uint16_t width = display.width();
-  
-  prepDisplayMono(0, y, width, height, GxEPD_WHITE);
  
   u8g2Fonts.setFont(icon_font);
   u8g2Fonts.drawStr(0, y+height, icon);
 
   u8g2Fonts.setFont(u8g2_font_helvB12_tf);  // a 12px font is good for a 25 pix height field with enought room for offsetY
+  if (line_width + message_offset > width){
+    u8g2Fonts.setFont(u8g2_font_helvB10_tf); // a 12 px was too large. Let's try 10
+    line_width = u8g2Fonts.getUTF8Width(line);
+  Serial.println(line_width+message_offset);
+
+  }
+  if (line_width + message_offset > width){
+    u8g2Fonts.setFont(u8g2_font_helvB08_tf); // a 10 px was too large. Let's make it 8
+    line_width = u8g2Fonts.getUTF8Width(line);
+    Serial.println(line_width+message_offset);
+  }
   uint16_t x = (width - line_width - message_offset)/2 + message_offset;
   u8g2Fonts.drawStr(x, y+height-offsetY_message, line); // single line of text
-
-  display.updateWindow(0, y, width, height, false);
 }
 
 void drawCredentials(const char* guest_ssid, const char* guest_password, const char* expire_tm)
 {
-  uint16_t width = display.width();
   uint16_t height = display.height();
-
-  prepDisplayMono(0, 0, width, height-75, GxEPD_WHITE);
 
   char message [64]; 
 
@@ -463,8 +481,6 @@ void drawCredentials(const char* guest_ssid, const char* guest_password, const c
   strcat(message, ";;");
   
   qrcode.create(message);  // draws qrcode. See https://github.com/yoprogramo/ESP_QRcode. 
-
-  display.updateWindow(0, 0, width, height-75, false);
 
   u8g2Fonts.setFont(u8g2_font_helvB12_tf); // just to get the width with u8g2 getUTF8Width.
   
@@ -619,84 +635,84 @@ void additionalInfo2()
                   u8g2Fonts.getUTF8Width("Último update:"), buf, u8g2Fonts.getUTF8Width(buf), height - 50, 25);
 }
 
+
 void statusInfo()
 // contents of the status bar.
 {
   uint16_t width = display.width();
   uint16_t height = display.height();
-  
-  display.fillRect(0, height - 25 , width, 25, GxEPD_BLACK);
-  display.updateWindow(0, height-25, width, 25, false);
-  display.fillRect(0, height - 25 , width, 25, GxEPD_WHITE);
-  display.updateWindow(0, height - 25, width, 25, false);
 
-  uint16_t batADC;
-  uint16_t acumulador = 0;
   char batADCc [10];
-  for (int8_t i =0; i<20;i++){
-    batADC = analogRead(35);
-    acumulador += batADC;
-  delay(70);
-  }
+  char rssic [10];
+  float batADC;
 
-  batADC=acumulador/20;
-  itoa(batADC,batADCc,10);
-
-  u8g2Fonts.setFont(u8g2_font_open_iconic_embedded_2x_t);
-
+  batADC = batteryLevel(batADCc);
+  
+  rssiLevel(rssic);
+  
   uint16_t x = 0;
   uint16_t y = height;
-  u8g2Fonts.drawStr(x,y, "\x49");
+  
+  u8g2Fonts.setFont(u8g2_font_open_iconic_embedded_2x_t);
+  
+  if (batADC <= BATMINADC)
+    u8g2Fonts.drawStr(x,y, "\x40");
+  else
+    u8g2Fonts.drawStr(x,y, "\x49");
 
-  x = width / 2 - 32 ;
+   u8g2Fonts.setFont(u8g2_font_open_iconic_other_2x_t);
+  x = width/2+2;
+  u8g2Fonts.drawStr(x,y, "\x46");
+
+  x = width / 2 - 42 ;
   y = height-2;
 
   u8g2Fonts.setFont(u8g2_font_helvB12_tf);
   u8g2Fonts.drawStr(x,y, batADCc);
-  display.updateWindow(0, height - 25, width, 25, false);
+  x = width / 2 + 20 ;
+  u8g2Fonts.drawStr(x,y, rssic);
+  //itoa(batADC,batADCc,10);
+  //u8g2Fonts.drawStr(x,y, batADCc);
 }
 
 void check_status()
 {
-  static ulong checkstatus_timeout  = 0;
-  static ulong checkwifi_timeout    = 0;
-  static ulong display_timeout = 0;
+  static ulong goSleep_timeout = 0;
+  static ulong checkwifi_timeout = 0;
+
   static ulong current_millis = millis();
 
-#define WIFICHECK_INTERVAL    1000L
-#define DISPLAY_INTERVAL  10000L
+#define SLEEP_INTERVAL  15000L /// 15 seconds of activity, sufficient to trigger a double reset
+#define WIFICHECK_INTERVAL    3000L
 
-#if USE_ESP_WIFIMANAGER_NTP
-  #define HEARTBEAT_INTERVAL    60000L
-#else
-  #define HEARTBEAT_INTERVAL    10000L
-#endif
-
-#define LED_INTERVAL          2000L
+#define TIME_TO_SLEEP  1800000000L        //Time ESP32 will sleep (in microseconds = 30 minutes)
+//#define TIME_TO_SLEEP  30000000L
 
   current_millis = millis();
 
-  /*// Check WiFi every WIFICHECK_INTERVAL (1) seconds.
+  if (goSleep_timeout == 0){
+    goSleep_timeout = current_millis + SLEEP_INTERVAL;
+  }
+
+  if (current_millis > goSleep_timeout)
+  {
+    if (batteryLevel()<BATMINADC){
+      pinMode(13, OUTPUT); //disable Flash
+      digitalWrite(13, HIGH); //disable Flash
+      gpio_deep_sleep_hold_en(); //disable Flash
+      esp_deep_sleep_start();
+    }
+  pinMode(13, OUTPUT); //disable Flash
+  digitalWrite(13, HIGH);//disable Flash
+  gpio_deep_sleep_hold_en(); //disable Flash*/
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP);
+  esp_deep_sleep_start();
+  }
+
   if ((current_millis > checkwifi_timeout) || (checkwifi_timeout == 0))
   {
     check_WiFi();
     checkwifi_timeout = current_millis + WIFICHECK_INTERVAL;
-  }
-
-  // Print hearbeat every HEARTBEAT_INTERVAL (10) seconds.
-  if ((current_millis > checkstatus_timeout) || (checkstatus_timeout == 0))
-  {
-    heartBeatPrint();
-    checkstatus_timeout = current_millis + HEARTBEAT_INTERVAL;
-  } */
-  // Check display update every DISPLAY_INTERNAL (30) seconds.
-  if ((current_millis > display_timeout) || (display_timeout == 0))
-  {
-   /* updateCredentials();
-    additionalInfo();
-    additionalInfo2();*/
-    statusInfo();
-    display_timeout = current_millis + DISPLAY_INTERVAL;
   }
 } 
 
@@ -795,15 +811,11 @@ bool readConfigFile()
   {
     // we could open the file
     size_t size = f.size();
-    // Allocate a buffer to store contents of the file.
-    std::unique_ptr<char[]> buf(new char[size + 1]);
+    
+    std::unique_ptr<char[]> buf(new char[size + 1]); // Allocate a buffer to store contents of the file.
 
-    // Read and store file contents in buf
-    f.readBytes(buf.get(), size);
-    // Closing file
+    f.readBytes(buf.get(), size);    // Read and store file contents in buf
     f.close();
-    // Using dynamic JSON buffer which is not the recommended memory model, but anyway
-    // See https://github.com/bblanchon/ArduinoJson/wiki/Memory%20model
 
     DynamicJsonDocument json(1024);
     auto deserializeError = deserializeJson(json, buf.get());
@@ -849,8 +861,8 @@ bool writeConfigFile()
   json[CREDENTIALS_JSON_Label]  = custom_CREDENTIALS_JSON;
   json[INFO1_REST_Label]  = custom_INFO1_REST;
   json[INFO2_REST_Label]  = custom_INFO2_REST;
-  // Open file for writing
-  File f = FileFS.open(CONFIG_FILE, "w");
+  
+  File f = FileFS.open(CONFIG_FILE, "w"); // Open file for writing
 
   if (!f)
   {
@@ -859,31 +871,17 @@ bool writeConfigFile()
   }
 
   serializeJsonPretty(json, Serial);
-  // Write data to file and close it
-  serializeJson(json, f);
-
+  serializeJson(json, f); // Write data to file and close it
   f.close();
 
   Serial.println(F("\nConfig File successfully saved"));
   return true;
 }
 
-// this function is just to display newly saved data,
-// it is not necessary though, because data is displayed
-// after WiFi manager resets ESP32
-void newConfigData() 
-{
-  Serial.println();
-  Serial.print(F("custom_CREDENTIALS_JSON: ")); 
-  Serial.println(custom_CREDENTIALS_JSON);
-  Serial.println();
-}
-
-
 void wifi_manager() 
 {
   Serial.println(F("\nConfig Portal requested."));
-  //Local intialization. Once its business is done, there is no need to keep it around
+  //Local initialization. Once its business is done, there is no need to keep it around
   // Use this to default DHCP hostname to ESP8266-XXXXXX or ESP32-XXXXXX
   //ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer);
   // Use this to personalize DHCP hostname (RFC952 conformed)
@@ -983,18 +981,39 @@ void wifi_manager()
   password = "My" + ssid;
 
   Serial.print(F("Starting configuration portal @ "));
-    
+  u8g2Fonts.setFont(u8g2_font_helvB08_tf);  // just to get correct message width
+
+  char buf[32];
+  char buf1[32];
+
+   strcpy(buf,"Configuration portal @");
+
 #if USE_CUSTOM_AP_IP    
   Serial.print(APStaticIP);
+  strcpy(buf1,APStaticIP);
 #else
   Serial.print(F("192.168.4.1"));
+  strcpy(buf1,"192.168.4.1");
 #endif
 
+  drawLineMessage(u8g2_font_open_iconic_embedded_2x_t, "\x48", 16, buf, 
+                  u8g2Fonts.getUTF8Width(buf), buf1, u8g2Fonts.getUTF8Width(buf1), 0, 25);
+  
   Serial.print(F(", SSID = "));
   Serial.print(ssid);
   Serial.print(F(", PWD = "));
   Serial.println(password);
 
+  ssid.toCharArray(buf,32);
+  password.toCharArray(buf1,32);
+  u8g2Fonts.setFont(u8g2_font_helvB12_tf);  // just to get correct message width
+  drawLineMessage(u8g2_font_open_iconic_www_2x_t, "\x51", 16, buf, 
+                  u8g2Fonts.getUTF8Width(buf), 30, 25, 3); //single info block with SSID
+   
+  drawLineMessage(u8g2_font_open_iconic_thing_2x_t, "\x4F", 16, buf1, 
+                  u8g2Fonts.getUTF8Width(buf1), 60, 25, 4); //single info block with password
+  display.update();
+   
   if (!ESPAsync_wifiManager.startConfigPortal((const char *) ssid.c_str(), password.c_str()))
   {
     Serial.println(F("Not connected to WiFi but continuing anyway."));
@@ -1085,6 +1104,8 @@ void displaySetup()
 {
     SPI.begin(EPD_SCLK, EPD_MISO, EPD_MOSI);
     display.init(); // enable diagnostic output on Serial
+    display.setRotation(0);
+    display.eraseDisplay();
     qrcode.init();
     u8g2Fonts.begin(display);
     u8g2Fonts.setFontMode(1);                           // use u8g2 transparent mode (this is default)
@@ -1096,22 +1117,10 @@ void displaySetup()
 
 void setup()
 {
-  // Put your setup code here, to run once
   Serial.begin(115200);
   while (!Serial);
 
   displaySetup();
-
-  Serial.print(F("\nStarting Wifi QrCode Info using ")); Serial.print(FS_Name);
-  Serial.print(F(" on ")); Serial.println(ARDUINO_BOARD);
-  Serial.println(ESP_ASYNC_WIFIMANAGER_VERSION);
-  Serial.println(ESP_DOUBLE_RESET_DETECTOR_VERSION);
-
-  if ( String(ESP_ASYNC_WIFIMANAGER_VERSION) < ESP_ASYNC_WIFIMANAGER_VERSION_MIN_TARGET )
-  {
-    Serial.print("Warning. Must use this example on Version later than : ");
-    Serial.println(ESP_ASYNC_WIFIMANAGER_VERSION_MIN_TARGET);
-  }
 
   Serial.setDebugOutput(false);
 
@@ -1140,10 +1149,9 @@ void setup()
     }
   }
 
-  // New in v1.4.0
+
   initAPIPConfigStruct(WM_AP_IPconfig);
   initSTAIPConfigStruct(WM_STA_IPconfig);
-  //////
   
   if (!readConfigFile())
   {
@@ -1157,10 +1165,7 @@ void setup()
     Serial.println(F("Can't instantiate. Disable DRD feature"));
   }
   else if (drd->detectDoubleReset())
-  {
-    // DRD, disable timeout.
-    //ESPAsync_wifiManager.setConfigPortalTimeout(0);
-    
+  {  
     Serial.println(F("Open Config Portal without Timeout: Double Reset Detected"));
     initialConfig = true;
   }
@@ -1171,18 +1176,13 @@ void setup()
   }
   else
   {   
-    // Pretend CP is necessary as we have no AP Credentials
-    initialConfig = true;
-
-    // Load stored data, the addAP ready for MultiWiFi reconnection
-    if (loadConfigData())
+      initialConfig = true; // Pretend CP is necessary as we have no AP Credentials
+    
+    if (loadConfigData()) // Load stored data, the addAP ready for MultiWiFi reconnection
     {
 #if USE_ESP_WIFIMANAGER_NTP      
     if ( strlen(WM_config.TZ_Name) > 0 )
-    {
-      LOGERROR3(F("Current TZ_Name ="), WM_config.TZ_Name, F(", TZ = "), WM_config.TZ);
-
-  
+    { 
       configTzTime(WM_config.TZ, "192.168.1.1", "0.pool.ntp.org", "1.pool.ntp.org");
     }
     else
@@ -1220,10 +1220,9 @@ void setup()
     updateCredentials();
     additionalInfo();
     additionalInfo2();
-    /*statusInfo();*/
-
-
-
+    statusInfo();
+    display.update();
+    display.powerDown();
 }
 
 
