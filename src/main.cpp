@@ -123,6 +123,8 @@ String Router_Pass;
 #define BATMAXADC 2268
 #define BATMULTIPLIER 0.227011
 #define BATINTERCEPT -414.9198
+#define BATADCSAMPLES 20
+#define BATADCINTERVAL  70
 
 typedef struct
 {
@@ -357,7 +359,6 @@ void printLocalTime()
   getLocalTime( &timeinfo );
 
   // Valid only if year > 2000. 
-  // You can get from timeinfo : tm_year, tm_mon, tm_mday, tm_hour, tm_min, tm_sec
   if (timeinfo.tm_year > 100 )
   {
     Serial.print("Local Date/Time: ");
@@ -375,18 +376,20 @@ void check_WiFi()
   }
 }
 
-float batteryLevel(char* batADCc){
-  float batADC = 0;
-  float batADCpc = 0;
+uint16_t batteryLevel(void){
   uint16_t acumulador = 0;
     
-  for (int8_t i = 0; i<20;i++){
-    batADC = analogRead(35);
-    acumulador += batADC;
-  delay(70);
+  for (int8_t i = 0; i<BATADCSAMPLES;i++){
+    acumulador += analogRead(35);
+  delay(BATADCINTERVAL);
   }
+  return acumulador/BATADCINTERVAL;
+}
 
-  batADC=acumulador/20;
+uint16_t batteryLevel(char* batADCc){
+  uint16_t batADC = batteryLevel();
+  float batADCpc = 0;
+  
   if (batADC <= BATMINADC){
     strcpy(batADCc, "0");
   } else 
@@ -400,25 +403,12 @@ float batteryLevel(char* batADCc){
   return batADC;
 }
 
-float batteryLevel(void){
-  float batADC;
-  uint16_t acumulador = 0;
-    
-  for (int8_t i = 0; i<20;i++){
-    batADC = analogRead(35);
-    acumulador += batADC;
-  delay(70);
-  }
-  batADC=acumulador/20;
-  return batADC;
-}
-
 void rssiLevel(char* rssic){
   if (WiFi.status() == WL_CONNECTED) {
-    int8_t RssI = WiFi.RSSI();
-    RssI = isnan(RssI) ? -100 : RssI;
-    RssI = min(max(2 * (RssI + 100), 0), 100);
-    itoa (RssI,rssic,10);
+    int8_t rssi = WiFi.RSSI();
+    rssi = isnan(rssi) ? -100 : rssi;
+    rssi = min(max(2 * (rssi + 100), 0), 100);
+    itoa (rssi,rssic,10);
     strcat(rssic,"%");
   } else{
     strcpy(rssic,"N/A");
@@ -480,7 +470,7 @@ void drawCredentials(const char* guest_ssid, const char* guest_password, const c
   strcat(message, guest_password);
   strcat(message, ";;");
   
-  qrcode.create(message);  // draws qrcode. See https://github.com/yoprogramo/ESP_QRcode. 
+  qrcode.create(message);  // draws qrcode. Modified from https://github.com/yoprogramo/ESP_QRcode. 
 
   u8g2Fonts.setFont(u8g2_font_helvB12_tf); // just to get the width with u8g2 getUTF8Width.
   
