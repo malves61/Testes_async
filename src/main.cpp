@@ -84,7 +84,7 @@ const char* CONFIG_FILE = "/ConfigCREDENTIALS.json";
 
 // Default configuration values for Credentials server
 
-#define CREDENTIALS_JSON  "http://192.168.1.1/guest_credentials.json"
+#define CREDENTIALS_JSON  "https://192.168.1.1/guest_credentials.json"
 #define INFO1_REST        "http://192.168.1.100:8080/rest/items/Piscina_TemperaturaVerificada"
 #define INFO2_REST        "http://192.168.1.100:8080/rest/items/Piscina_Temperatura_Verificada_Update"               
 
@@ -383,7 +383,7 @@ uint16_t batteryLevel(void){
     acumulador += analogRead(35);
   delay(BATADCINTERVAL);
   }
-  return acumulador/BATADCINTERVAL;
+  return acumulador/BATADCSAMPLES;
 }
 
 uint16_t batteryLevel(char* batADCc){
@@ -668,15 +668,12 @@ void statusInfo()
 void check_status()
 {
   static ulong goSleep_timeout = 0;
-  static ulong checkwifi_timeout = 0;
 
   static ulong current_millis = millis();
 
 #define SLEEP_INTERVAL  15000L /// 15 seconds of activity, sufficient to trigger a double reset
-#define WIFICHECK_INTERVAL    3000L
 
 #define TIME_TO_SLEEP  1800000000L        //Time ESP32 will sleep (in microseconds = 30 minutes)
-//#define TIME_TO_SLEEP  30000000L
 
   current_millis = millis();
 
@@ -684,25 +681,14 @@ void check_status()
     goSleep_timeout = current_millis + SLEEP_INTERVAL;
   }
 
-  if (current_millis > goSleep_timeout)
-  {
-    if (batteryLevel()<BATMINADC){
-      pinMode(13, OUTPUT); //disable Flash
-      digitalWrite(13, HIGH); //disable Flash
-      gpio_deep_sleep_hold_en(); //disable Flash
-      esp_deep_sleep_start();
+  if (current_millis > goSleep_timeout){
+    pinMode(13, OUTPUT); //disable Flash
+    digitalWrite(13, HIGH); //disable Flash
+    gpio_deep_sleep_hold_en(); //disable Flash
+    if (batteryLevel()>BATMINADC){
+      esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP);
     }
-  pinMode(13, OUTPUT); //disable Flash
-  digitalWrite(13, HIGH);//disable Flash
-  gpio_deep_sleep_hold_en(); //disable Flash*/
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP);
-  esp_deep_sleep_start();
-  }
-
-  if ((current_millis > checkwifi_timeout) || (checkwifi_timeout == 0))
-  {
-    check_WiFi();
-    checkwifi_timeout = current_millis + WIFICHECK_INTERVAL;
+    esp_deep_sleep_start();
   }
 } 
 
